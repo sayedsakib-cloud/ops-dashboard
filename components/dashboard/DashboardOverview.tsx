@@ -6,7 +6,14 @@ import KPIWidget from "./KPIWidget";
 import TaskWidget from "./TaskWidget";
 import HireflixWidget from "./HireflixWidget";
 import PerformanceOverview from "./PerformanceOverview";
-import { DateRange, getLastNWeeksDateRange, getAvailableWeeks, filterKPIByDateRange, filterTasksByDateRange, filterHireflixByDateRange } from "@/lib/dashboardHelpers";
+import {
+  DateRange,
+  getLastNWeeksDateRange,
+  getAvailableWeeks,
+  filterKPIByDateRange,
+  filterTasksByDateRange,
+  filterHireflixByDateRange,
+} from "@/lib/dashboardHelpers";
 
 type IntercomInbox = {
   teamId: string;
@@ -35,7 +42,7 @@ type DashboardState = {
 
 export default function DashboardOverview() {
   const [state, setState] = useState<DashboardState>({ loading: true });
-  const [dateRange, setDateRange] = useState<DateRange>(getLastNWeeksDateRange(8)); // Default: last 8 weeks
+  const [dateRange, setDateRange] = useState<DateRange>(getLastNWeeksDateRange(8));
   const [availableWeeks, setAvailableWeeks] = useState<Array<{ start: string; end: string }>>([]);
 
   useEffect(() => {
@@ -46,24 +53,38 @@ export default function DashboardOverview() {
           fetch("/api/test/sheets", { cache: "no-store" }),
         ]);
 
-        if (!intercomRes.ok || !sheetsRes.ok) {
-          const [intercomErr, sheetsErr] = await Promise.all([
-            intercomRes.text(),
-            sheetsRes.text(),
-          ]);
+        // ✅ FIX: Read both response bodies FIRST, then check status separately.
+        // The old code called intercomRes.text() even when intercomRes was OK (200),
+        // which consumed the body and dumped the full Intercom JSON into the error message.
+        const [intercomText, sheetsText] = await Promise.all([
+          intercomRes.text(),
+          sheetsRes.text(),
+        ]);
 
-          throw new Error(
-            `Intercom error: ${intercomRes.status} ${intercomErr} | Sheets error: ${sheetsRes.status} ${sheetsErr}`
-          );
+        const errors: string[] = [];
+
+        if (!intercomRes.ok) {
+          errors.push(`Performance error: ${intercomRes.status} – ${intercomText}`);
         }
 
-        const intercom = await intercomRes.json();
-        const sheets = await sheetsRes.json();
+        if (!sheetsRes.ok) {
+          errors.push(`Sheets error: ${sheetsRes.status} – ${sheetsText}`);
+        }
+
+        if (errors.length > 0) {
+          throw new Error(errors.join(" | "));
+        }
+
+        // Both responses are OK — parse JSON from the already-read text
+        const intercom = JSON.parse(intercomText);
+        const sheets = JSON.parse(sheetsText);
 
         setState({ loading: false, intercom, sheets });
 
         // Extract available weeks from Individual KPI Database
-        const individualKPI = sheets.kpi?.find((s: SheetData) => s.tab.includes("Individual"));
+        const individualKPI = sheets.kpi?.find((s: SheetData) =>
+          s.tab.includes("Individual")
+        );
         if (individualKPI) {
           const weeks = getAvailableWeeks(individualKPI.rows);
           setAvailableWeeks(weeks);
@@ -100,20 +121,32 @@ export default function DashboardOverview() {
   const tasksSheet = state.sheets?.tasks?.find((s) => s.tab.includes("Regular"));
   const hireflixSheet = state.sheets?.tasks?.find((s) => s.tab.includes("Hireflix"));
 
-  const filteredIndividualKPI = individualKPI ? filterKPIByDateRange(individualKPI.rows, dateRange) : [];
-  const filteredTeamKPI = teamKPI ? filterKPIByDateRange(teamKPI.rows, dateRange) : [];
-  const filteredTasks = tasksSheet ? filterTasksByDateRange(tasksSheet.rows, dateRange) : [];
-  const filteredHireflix = hireflixSheet ? filterHireflixByDateRange(hireflixSheet.rows, dateRange) : [];
+  const filteredIndividualKPI = individualKPI
+    ? filterKPIByDateRange(individualKPI.rows, dateRange)
+    : [];
+  const filteredTeamKPI = teamKPI
+    ? filterKPIByDateRange(teamKPI.rows, dateRange)
+    : [];
+  const filteredTasks = tasksSheet
+    ? filterTasksByDateRange(tasksSheet.rows, dateRange)
+    : [];
+  const filteredHireflix = hireflixSheet
+    ? filterHireflixByDateRange(hireflixSheet.rows, dateRange)
+    : [];
 
   return (
     <div className="space-y-6">
-      {/* Performance Overview - New Section */}
+      {/* Performance Overview */}
       <section className="rounded-3xl bg-white p-8 shadow-lg">
         <PerformanceOverview />
       </section>
 
       {/* Date Filter */}
-      <DateFilter dateRange={dateRange} onDateRangeChange={setDateRange} availableWeeks={availableWeeks} />
+      <DateFilter
+        dateRange={dateRange}
+        onDateRangeChange={setDateRange}
+        availableWeeks={availableWeeks}
+      />
 
       {/* KPI Widgets */}
       <div className="grid gap-6 lg:grid-cols-2">
@@ -125,7 +158,6 @@ export default function DashboardOverview() {
             type="individual"
           />
         )}
-
         {teamKPI && (
           <KPIWidget
             title="Team KPI Database"
@@ -138,9 +170,18 @@ export default function DashboardOverview() {
 
       {/* Task Widgets */}
       <div className="grid gap-6 lg:grid-cols-2">
-        {tasksSheet && <TaskWidget data={filteredTasks.map((item) => item.row as unknown[])} columns={tasksSheet.columns || []} />}
-
-        {hireflixSheet && <HireflixWidget data={filteredHireflix.map((item) => item.row as unknown[])} columns={hireflixSheet.columns || []} />}
+        {tasksSheet && (
+          <TaskWidget
+            data={filteredTasks.map((item) => item.row as unknown[])}
+            columns={tasksSheet.columns || []}
+          />
+        )}
+        {hireflixSheet && (
+          <HireflixWidget
+            data={filteredHireflix.map((item) => item.row as unknown[])}
+            columns={hireflixSheet.columns || []}
+          />
+        )}
       </div>
     </div>
   );
