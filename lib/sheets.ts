@@ -5,18 +5,16 @@
  *
  * Required Vercel environment variables (set ALL of these with real values):
  *
- *   GOOGLE_SERVICE_ACCOUNT_EMAIL   → from your service account JSON: "client_email"
- *   GOOGLE_PRIVATE_KEY             → from your service account JSON: "private_key"
- *                                    (paste the whole value including -----BEGIN ... END-----)
- *   GOOGLE_PRIVATE_KEY_ID          → from your service account JSON: "private_key_id"
- *   GOOGLE_CLOUD_PROJECT_ID        → from your service account JSON: "project_id"
- *   SHEETS_SPREADSHEET_ID          → the long ID in your Google Sheet URL:
- *                                    docs.google.com/spreadsheets/d/<THIS_PART>/edit
- *   KPI_TAB_NAMES                  → comma-separated tab names, e.g. "Individual KPI,Team KPI"
- *   TASKS_TAB_NAMES                → comma-separated tab names, e.g. "Regular Tasks,Hireflix"
+ *   GOOGLE_SERVICE_ACCOUNT_EMAIL   → service account JSON → "client_email"
+ *   GOOGLE_PRIVATE_KEY             → service account JSON → "private_key"
+ *                                    (paste the full value including -----BEGIN/END-----)
+ *   GOOGLE_PRIVATE_KEY_ID          → service account JSON → "private_key_id"
+ *   GOOGLE_CLOUD_PROJECT_ID        → service account JSON → "project_id"
+ *   SHEETS_SPREADSHEET_ID          → Google Sheet URL → .../spreadsheets/d/<THIS>/edit
+ *   KPI_TAB_NAMES                  → comma-separated tab names e.g. "Individual KPI,Team KPI"
+ *   TASKS_TAB_NAMES                → comma-separated tab names e.g. "Regular Tasks,Hireflix"
  *
- * Make sure the service account email has Viewer access on the Google Sheet:
- *   Sheet → Share → paste the service account email → Viewer
+ * Share the Google Sheet with the service account email (Viewer access).
  */
 
 import { sheets_v4, google } from "googleapis";
@@ -41,12 +39,12 @@ function getAuthClient() {
       .filter(Boolean)
       .join(", ");
     throw new Error(
-      `Google Sheets auth is missing these Vercel env vars: ${missing}. ` +
-        `Go to Vercel → Settings → Environment Variables and paste the actual values.`
+      `Google Sheets: missing Vercel env vars: ${missing}. ` +
+        `Go to Vercel → Settings → Environment Variables and paste the actual values from your service account JSON.`
     );
   }
 
-  // Vercel sometimes escapes \n in private keys — normalise it
+  // Vercel sometimes stores \n literally — convert to real newlines
   const privateKey = rawKey.replace(/\\n/g, "\n");
 
   return new google.auth.GoogleAuth({
@@ -107,8 +105,9 @@ async function fetchTab(
 
 /**
  * Returns all KPI sheet tabs defined in KPI_TAB_NAMES.
+ * Imported as getKPIData by app/api/test/sheets/route.ts
  */
-export async function fetchKPISheets(): Promise<SheetData[]> {
+export async function getKPIData(): Promise<SheetData[]> {
   const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
   const tabNamesRaw = process.env.KPI_TAB_NAMES;
 
@@ -122,23 +121,20 @@ export async function fetchKPISheets(): Promise<SheetData[]> {
     throw new Error(
       `Missing Vercel env vars: ${missing}. ` +
         `Set SHEETS_SPREADSHEET_ID to the ID in your Google Sheet URL, ` +
-        `and KPI_TAB_NAMES to a comma-separated list of tab names (e.g. "Individual KPI,Team KPI").`
+        `and KPI_TAB_NAMES to comma-separated tab names (e.g. "Individual KPI,Team KPI").`
     );
   }
 
   const tabNames = tabNamesRaw.split(",").map((t) => t.trim()).filter(Boolean);
 
-  const results = await Promise.all(
-    tabNames.map((tab) => fetchTab(spreadsheetId, tab))
-  );
-
-  return results;
+  return Promise.all(tabNames.map((tab) => fetchTab(spreadsheetId, tab)));
 }
 
 /**
  * Returns all Tasks sheet tabs defined in TASKS_TAB_NAMES.
+ * Imported as getTasksData by app/api/test/sheets/route.ts
  */
-export async function fetchTaskSheets(): Promise<SheetData[]> {
+export async function getTasksData(): Promise<SheetData[]> {
   const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
   const tabNamesRaw = process.env.TASKS_TAB_NAMES;
 
@@ -151,28 +147,17 @@ export async function fetchTaskSheets(): Promise<SheetData[]> {
       .join(", ");
     throw new Error(
       `Missing Vercel env vars: ${missing}. ` +
-        `Set TASKS_TAB_NAMES to a comma-separated list of tab names (e.g. "Regular Tasks,Hireflix").`
+        `Set TASKS_TAB_NAMES to comma-separated tab names (e.g. "Regular Tasks,Hireflix").`
     );
   }
 
   const tabNames = tabNamesRaw.split(",").map((t) => t.trim()).filter(Boolean);
 
-  const results = await Promise.all(
-    tabNames.map((tab) => fetchTab(spreadsheetId, tab))
-  );
-
-  return results;
+  return Promise.all(tabNames.map((tab) => fetchTab(spreadsheetId, tab)));
 }
 
-// ─── Aliases for existing route.ts imports ────────────────────────────────────
-// app/api/test/sheets/route.ts imports these names — keep them working.
-export const getKPIData = fetchKPISheets;
-export const getTasksData = fetchTaskSheets;
-
-// ─────────────────────────────────────────────────────────────────────────────
-
 /**
- * Fetches a single tab by name. Useful for ad-hoc queries.
+ * Fetches any single tab by name.
  */
 export async function fetchSheet(tabName: string): Promise<SheetData> {
   const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
