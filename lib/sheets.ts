@@ -1,3 +1,24 @@
+/**
+ * lib/sheets.ts
+ *
+ * Google Sheets client using a Service Account.
+ *
+ * Required Vercel environment variables (set ALL of these with real values):
+ *
+ *   GOOGLE_SERVICE_ACCOUNT_EMAIL   → from your service account JSON: "client_email"
+ *   GOOGLE_PRIVATE_KEY             → from your service account JSON: "private_key"
+ *                                    (paste the whole value including -----BEGIN ... END-----)
+ *   GOOGLE_PRIVATE_KEY_ID          → from your service account JSON: "private_key_id"
+ *   GOOGLE_CLOUD_PROJECT_ID        → from your service account JSON: "project_id"
+ *   SHEETS_SPREADSHEET_ID          → the long ID in your Google Sheet URL:
+ *                                    docs.google.com/spreadsheets/d/<THIS_PART>/edit
+ *   KPI_TAB_NAMES                  → comma-separated tab names, e.g. "Individual KPI,Team KPI"
+ *   TASKS_TAB_NAMES                → comma-separated tab names, e.g. "Regular Tasks,Hireflix"
+ *
+ * Make sure the service account email has Viewer access on the Google Sheet:
+ *   Sheet → Share → paste the service account email → Viewer
+ */
+
 import { sheets_v4, google } from "googleapis";
 
 const SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
@@ -5,116 +26,155 @@ const SCOPES = ["https://www.googleapis.com/auth/spreadsheets.readonly"];
 let sheetsClient: sheets_v4.Sheets | null = null;
 
 function getAuthClient() {
-  const auth = new google.auth.GoogleAuth({
+  const email = process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL;
+  const rawKey = process.env.GOOGLE_PRIVATE_KEY;
+  const privateKeyId = process.env.GOOGLE_PRIVATE_KEY_ID;
+  const projectId = process.env.GOOGLE_CLOUD_PROJECT_ID;
+
+  if (!email || !rawKey || !privateKeyId || !projectId) {
+    const missing = [
+      !email && "GOOGLE_SERVICE_ACCOUNT_EMAIL",
+      !rawKey && "GOOGLE_PRIVATE_KEY",
+      !privateKeyId && "GOOGLE_PRIVATE_KEY_ID",
+      !projectId && "GOOGLE_CLOUD_PROJECT_ID",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(
+      `Google Sheets auth is missing these Vercel env vars: ${missing}. ` +
+        `Go to Vercel → Settings → Environment Variables and paste the actual values.`
+    );
+  }
+
+  // Vercel sometimes escapes \n in private keys — normalise it
+  const privateKey = rawKey.replace(/\\n/g, "\n");
+
+  return new google.auth.GoogleAuth({
     credentials: {
       type: "service_account",
-      project_id: process.env.GOOGLE_CLOUD_PROJECT_ID,
-      private_key_id: process.env.GOOGLE_PRIVATE_KEY_ID,
-      private_key: process.env.GOOGLE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-      client_email: process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL,
-      auth_uri: "https://accounts.google.com/o/oauth2/auth",
-      token_uri: "https://oauth2.googleapis.com/token",
-      auth_provider_x509_cert_url: "https://www.googleapis.com/oauth2/v1/certs",
-    } as any,
+      project_id: projectId,
+      private_key_id: privateKeyId,
+      private_key: privateKey,
+      client_email: email,
+    },
     scopes: SCOPES,
   });
-  return auth;
 }
 
-function getSheetsClient() {
+function getSheetsClient(): sheets_v4.Sheets {
   if (!sheetsClient) {
-    sheetsClient = google.sheets({
-      version: "v4",
-      auth: getAuthClient(),
-    });
+    const auth = getAuthClient();
+    sheetsClient = google.sheets({ version: "v4", auth });
   }
   return sheetsClient;
 }
 
-export interface SheetData {
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type SheetData = {
   tab: string;
+  columns: string[];
   rows: unknown[][];
-  columns?: string[];
-}
+};
 
-export async function readSheet(
+// ─── Core fetch helper ────────────────────────────────────────────────────────
+
+async function fetchTab(
   spreadsheetId: string,
-  range: string
+  tabName: string
 ): Promise<SheetData> {
-  const sheets = getSheetsClient();
+  const client = getSheetsClient();
 
-  const response = await sheets.spreadsheets.values.get({
+  const response = await client.spreadsheets.values.get({
     spreadsheetId,
-    range,
+    range: tabName,
   });
 
-  const values = response.data.values || [];
-  const columns = values.length > 0 ? (values[0] as string[]) : [];
-  const rows = values.slice(1);
+  const rawRows = (response.data.values as unknown[][]) ?? [];
 
-  return {
-    tab: range.split("!")[0] || "Unknown",
-    rows,
-    columns,
-  };
+  if (rawRows.length === 0) {
+    return { tab: tabName, columns: [], rows: [] };
+  }
+
+  // First row = column headers
+  const columns = rawRows[0].map((c) => String(c ?? ""));
+  const rows = rawRows.slice(1);
+
+  return { tab: tabName, columns, rows };
 }
 
-export async function readMultipleTabs(
-  spreadsheetId: string,
-  tabNames: string[]
-): Promise<SheetData[]> {
+// ─── Public API ───────────────────────────────────────────────────────────────
+
+/**
+ * Returns all KPI sheet tabs defined in KPI_TAB_NAMES.
+ */
+export async function fetchKPISheets(): Promise<SheetData[]> {
+  const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
+  const tabNamesRaw = process.env.KPI_TAB_NAMES;
+
+  if (!spreadsheetId || !tabNamesRaw) {
+    const missing = [
+      !spreadsheetId && "SHEETS_SPREADSHEET_ID",
+      !tabNamesRaw && "KPI_TAB_NAMES",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(
+      `Missing Vercel env vars: ${missing}. ` +
+        `Set SHEETS_SPREADSHEET_ID to the ID in your Google Sheet URL, ` +
+        `and KPI_TAB_NAMES to a comma-separated list of tab names (e.g. "Individual KPI,Team KPI").`
+    );
+  }
+
+  const tabNames = tabNamesRaw.split(",").map((t) => t.trim()).filter(Boolean);
+
   const results = await Promise.all(
-    tabNames.map(async (tab) => {
-      try {
-        // Format: 'Tab Name'!A:Z to read all columns
-        const range = `'${tab}'!A:Z`;
-        return await readSheet(spreadsheetId, range);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error(`Failed to read tab "${tab}":`, msg);
-        return {
-          tab,
-          rows: [],
-          columns: [],
-        };
-      }
-    })
+    tabNames.map((tab) => fetchTab(spreadsheetId, tab))
   );
 
   return results;
 }
 
-export async function getKPIData(): Promise<SheetData[]> {
+/**
+ * Returns all Tasks sheet tabs defined in TASKS_TAB_NAMES.
+ */
+export async function fetchTaskSheets(): Promise<SheetData[]> {
   const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
-  const kpiTabNames = (process.env.KPI_TAB_NAMES || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
+  const tabNamesRaw = process.env.TASKS_TAB_NAMES;
 
-  if (!spreadsheetId || kpiTabNames.length === 0) {
-    throw new Error("SHEETS_SPREADSHEET_ID or KPI_TAB_NAMES not configured");
+  if (!spreadsheetId || !tabNamesRaw) {
+    const missing = [
+      !spreadsheetId && "SHEETS_SPREADSHEET_ID",
+      !tabNamesRaw && "TASKS_TAB_NAMES",
+    ]
+      .filter(Boolean)
+      .join(", ");
+    throw new Error(
+      `Missing Vercel env vars: ${missing}. ` +
+        `Set TASKS_TAB_NAMES to a comma-separated list of tab names (e.g. "Regular Tasks,Hireflix").`
+    );
   }
 
-  return readMultipleTabs(spreadsheetId, kpiTabNames);
+  const tabNames = tabNamesRaw.split(",").map((t) => t.trim()).filter(Boolean);
+
+  const results = await Promise.all(
+    tabNames.map((tab) => fetchTab(spreadsheetId, tab))
+  );
+
+  return results;
 }
 
-export async function getTasksData(): Promise<SheetData[]> {
+/**
+ * Fetches a single tab by name. Useful for ad-hoc queries.
+ */
+export async function fetchSheet(tabName: string): Promise<SheetData> {
   const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
-  const taskTabNames = (process.env.TASKS_TAB_NAMES || "")
-    .split(",")
-    .map((t) => t.trim())
-    .filter(Boolean);
 
-  if (!spreadsheetId || taskTabNames.length === 0) {
-    throw new Error("SHEETS_SPREADSHEET_ID or TASKS_TAB_NAMES not configured");
+  if (!spreadsheetId) {
+    throw new Error(
+      "SHEETS_SPREADSHEET_ID is not set in Vercel environment variables."
+    );
   }
 
-  return readMultipleTabs(spreadsheetId, taskTabNames);
+  return fetchTab(spreadsheetId, tabName);
 }
-
-export const Sheets = {
-  readSheet,
-  readMultipleTabs,
-  getKPIData,
-  getTasksData,
-};
