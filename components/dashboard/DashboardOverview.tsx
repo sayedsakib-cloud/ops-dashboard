@@ -42,7 +42,7 @@ export default function DashboardOverview() {
     async function loadData() {
       try {
         const [intercomRes, sheetsRes] = await Promise.all([
-          fetch("/api/test/intercom", { cache: "no-store" }),
+          fetch("/api/performance", { cache: "no-store" }),
           fetch("/api/test/sheets", { cache: "no-store" }),
         ]);
 
