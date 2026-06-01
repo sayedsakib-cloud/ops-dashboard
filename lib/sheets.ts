@@ -121,7 +121,7 @@ export async function getKPIData(): Promise<SheetData[]> {
     throw new Error(
       `Missing Vercel env vars: ${missing}. ` +
         `Set SHEETS_SPREADSHEET_ID to the ID in your Google Sheet URL, ` +
-        `and KPI_TAB_NAMES to comma-separated tab names (e.g. "Individual KPI,Team KPI").`
+        `and KPI_TAB_NAMES to comma-separated tab names (e.g. "Individual KPI Database,Team KPI Database,Quarterly Average Points").`
     );
   }
 
@@ -147,7 +147,7 @@ export async function getTasksData(): Promise<SheetData[]> {
       .join(", ");
     throw new Error(
       `Missing Vercel env vars: ${missing}. ` +
-        `Set TASKS_TAB_NAMES to comma-separated tab names (e.g. "Regular Tasks,Hireflix").`
+        `Set TASKS_TAB_NAMES to comma-separated tab names (e.g. "Regular Tasks Report,Hireflix Count").`
     );
   }
 
