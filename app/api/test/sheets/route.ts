@@ -1,4 +1,4 @@
-import { fetchKPISheets as getKPIData, fetchTaskSheets as getTasksData } from "@/lib/sheets";
+import { getKPIData, getTasksData } from "@/lib/sheets";
 // TODO: Re-enable session check after org approval
 // import { getServerSession } from "next-auth";
 // import { authOptions } from "@/lib/auth";
