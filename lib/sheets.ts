@@ -164,6 +164,13 @@ export async function fetchTaskSheets(): Promise<SheetData[]> {
   return results;
 }
 
+// ─── Aliases for existing route.ts imports ────────────────────────────────────
+// app/api/test/sheets/route.ts imports these names — keep them working.
+export const getKPIData = fetchKPISheets;
+export const getTasksData = fetchTaskSheets;
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /**
  * Fetches a single tab by name. Useful for ad-hoc queries.
  */
