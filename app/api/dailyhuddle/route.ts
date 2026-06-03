@@ -87,8 +87,8 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const dateParam = searchParams.get("date");
-    const spreadsheetId = process.env.SHEETS_SPREADSHEET_ID;
-    if (!spreadsheetId) throw new Error("SHEETS_SPREADSHEET_ID not set");
+    const spreadsheetId = process.env.DAILY_HUDDLE_SPREADSHEET_ID;
+    if (!spreadsheetId) throw new Error("DAILY_HUDDLE_SPREADSHEET_ID not set");
 
     const sheets = await sheetsClient();
 
