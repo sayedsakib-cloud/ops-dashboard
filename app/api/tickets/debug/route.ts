@@ -22,7 +22,7 @@ export async function GET(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const token   = process.env.INTERCOM_API_KEY!;   // ← fixed env var name
+    const token   = process.env.INTERCOM_ACCESS_TOKEN!;   // ← fixed env var name
     const { searchParams } = new URL(req.url);
     const section = searchParams.get("section") ?? "cr";
     const inboxId = INBOX[section];
