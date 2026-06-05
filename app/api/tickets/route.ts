@@ -2,12 +2,18 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-const INTERCOM_API = "https://api.intercom.io";
-const INBOX: Record<string, string> = {
-  cr:     "6547584",
-  bizops: "8314220",
+const INTERCOM_API  = "https://api.intercom.io";
+const APP_ID        = "aphmhtyj"; // for ticket deep-links
+const SLA_SECS      = 24 * 3600;
+
+const INBOX: Record<string, string> = { cr: "6547584", bizops: "8314220" };
+
+// Known agents per section — used for name-matching & combined query
+const SECTION_AGENTS: Record<string, string[]> = {
+  cr:     ["samael", "camellia warren", "anna linhart"],
+  bizops: ["oliver ellison", "luna parker", "paul wilson", "sienna clarke",
+           "nauvi becker", "mathew adrian castle", "delilah", "michael anderson"],
 };
-const SLA_SECS = 24 * 3600;
 
 const TICKET_TYPES: Record<string, string[]> = {
   cr: [
@@ -55,48 +61,51 @@ function avg(arr: number[]) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
-// ── Fetch admins (to map admin_assignee_id → name) ─────────────────────────
-async function fetchAdminMap(token: string): Promise<Map<string, string>> {
+// ── Fetch admins → id→name map ─────────────────────────────────────────────
+async function fetchAdminMap(token: string): Promise<{ map: Map<string, string>; admins: any[] }> {
   try {
     const res  = await fetch(`${INTERCOM_API}/admins`, {
-      headers: {
-        Authorization:      `Bearer ${token}`,
-        Accept:             "application/json",
-        "Intercom-Version": "2.11",
-      },
+      headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
     });
     const data = await res.json();
+    const list = data.admins ?? [];
     const map  = new Map<string, string>();
-    (data.admins ?? []).forEach((a: any) => {
-      map.set(String(a.id), a.name ?? a.email ?? `Admin ${a.id}`);
-    });
-    return map;
+    list.forEach((a: any) => map.set(String(a.id), a.name ?? a.email ?? `Admin ${a.id}`));
+    return { map, admins: list };
   } catch {
-    return new Map();
+    return { map: new Map(), admins: [] };
   }
 }
 
-// ── Fetch tickets with pagination ─────────────────────────────────────────
+// ── Fetch tickets (combined: team OR known agents) ─────────────────────────
 async function fetchTickets(
   token: string,
   inboxId: string,
+  agentIds: number[],
   cAfter: number,
   cBefore: number,
 ): Promise<any[]> {
-  const filters: any[] = [
+  // Build OR clause: team_assignee_id OR any known agent
+  const orClauses: any[] = [
     { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
-    { field: "created_at",       operator: ">", value: cAfter            },
-    { field: "created_at",       operator: "<", value: cBefore           },
+    ...agentIds.map(id => ({ field: "admin_assignee_id", operator: "=", value: id })),
   ];
 
+  const query = {
+    operator: "AND",
+    value: [
+      orClauses.length > 1 ? { operator: "OR", value: orClauses } : orClauses[0],
+      { field: "created_at", operator: ">", value: cAfter  },
+      { field: "created_at", operator: "<", value: cBefore },
+    ],
+  };
+
   const all: any[] = [];
+  const seen = new Set<string>();
   let cursor: string | null = null;
 
-  for (let p = 0; p < 10; p++) {
-    const body: any = {
-      query:      { operator: "AND", value: filters },
-      pagination: { per_page: 150 },
-    };
+  for (let p = 0; p < 15; p++) { // up to 2250 tickets
+    const body: any = { query, pagination: { per_page: 150 } };
     if (cursor) body.pagination.starting_after = cursor;
 
     const res = await fetch(`${INTERCOM_API}/tickets/search`, {
@@ -104,20 +113,22 @@ async function fetchTickets(
       headers: {
         Authorization:      `Bearer ${token}`,
         "Content-Type":     "application/json",
-        Accept:             "application/json",
         "Intercom-Version": "2.11",
       },
       body: JSON.stringify(body),
     });
-
     if (!res.ok) {
       const txt = await res.text();
       throw new Error(`Intercom ${res.status}: ${txt}`);
     }
-
     const data  = await res.json();
     const items = data.tickets ?? data.data ?? [];
-    all.push(...items);
+
+    // Deduplicate (OR query can return duplicates)
+    for (const t of items) {
+      if (!seen.has(t.id)) { seen.add(t.id); all.push(t); }
+    }
+
     cursor = data.pages?.next?.starting_after ?? null;
     if (!cursor) break;
   }
@@ -138,23 +149,31 @@ export async function GET(req: Request) {
     const resolvedTo   = searchParams.get("resolvedTo")   ?? "";
     const typeFilter   = searchParams.get("type")         ?? "";
 
-    const token   = process.env.INTERCOM_ACCESS_TOKEN;
+    const token = process.env.INTERCOM_ACCESS_TOKEN;
     if (!token) throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
     const now    = Math.floor(Date.now() / 1000);
     const d30    = now - 30 * 86400;
     const cAfter  = createdFrom ? toUnixStart(createdFrom) : d30;
     const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
-
     const inboxId = INBOX[section] ?? INBOX.cr;
 
-    // Fetch tickets + admins in parallel
-    const [tickets, adminMap] = await Promise.all([
-      fetchTickets(token, inboxId, cAfter, cBefore),
-      fetchAdminMap(token),
-    ]);
+    // ── Fetch admins + resolve agent IDs for this section (parallel) ───────
+    const { map: adminMap, admins } = await fetchAdminMap(token);
 
-    // ── Resolved date filter (client-side) ──────────────────────────────
+    const sectionAgentNames = SECTION_AGENTS[section] ?? [];
+    const agentIds = admins
+      .filter((a: any) => {
+        const name = (a.name ?? "").toLowerCase();
+        return sectionAgentNames.some(n => name.includes(n) || n.includes(name));
+      })
+      .map((a: any) => parseInt(a.id))
+      .filter(Boolean);
+
+    // ── Fetch tickets ──────────────────────────────────────────────────────
+    const tickets = await fetchTickets(token, inboxId, agentIds, cAfter, cBefore);
+
+    // ── Client-side resolved date filter ───────────────────────────────────
     let filtered = tickets;
     if (resolvedFrom || resolvedTo) {
       const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : 0;
@@ -169,52 +188,45 @@ export async function GET(req: Request) {
       });
     }
 
-    // ── Ticket type filter ───────────────────────────────────────────────
+    // ── Ticket type filter ─────────────────────────────────────────────────
     if (typeFilter) {
       filtered = filtered.filter(t => t.ticket_type?.name === typeFilter);
     }
 
-    // ── Merge hardcoded + dynamic ticket types ───────────────────────────
-    const dynamicTypes = new Set<string>();
-    tickets.forEach(t => { if (t.ticket_type?.name) dynamicTypes.add(t.ticket_type.name); });
-    const base  = TICKET_TYPES[section] ?? [];
-    const extra = [...dynamicTypes].filter(n => !base.includes(n)).sort();
-    const ticketTypes = [...base, ...extra];
+    // ── Ticket types for dropdown + chart ──────────────────────────────────
+    const typeCountMap = new Map<string, number>();
+    filtered.forEach(t => {
+      const name = t.ticket_type?.name;
+      if (name) typeCountMap.set(name, (typeCountMap.get(name) ?? 0) + 1);
+    });
+    const ticketTypeStats = [...typeCountMap.entries()]
+      .map(([name, count]) => ({ name, count }))
+      .sort((a, b) => b.count - a.count);
 
-    // ── Resolved vs open ────────────────────────────────────────────────
-    // open === false means resolved/closed in Intercom Tickets
+    const base     = TICKET_TYPES[section] ?? [];
+    const dynamic  = [...typeCountMap.keys()].filter(n => !base.includes(n)).sort();
+    const ticketTypes = [...base, ...dynamic];
+
+    // ── Resolved vs open ───────────────────────────────────────────────────
     const resolved = filtered.filter(t => t.open === false || t.ticket_state === "resolved");
     const open     = filtered.filter(t => t.open !== false && t.ticket_state !== "resolved");
 
-    // ── Per-ticket metrics ───────────────────────────────────────────────
+    // ── Per-ticket stats ───────────────────────────────────────────────────
     type Stat = {
       secs: number; officeHours: boolean;
-      agentName: string; slaMet: boolean;
+      agentName: string; slaMet: boolean; ticket: any;
     };
-
     const stats: Stat[] = resolved.map(t => {
-      // Resolution time: updated_at is the last state change timestamp
-      // (ticket_state_updated_at doesn't exist in the API response)
       const closeTs   = t.updated_at ?? 0;
       const secs      = (closeTs > 0 && closeTs > t.created_at)
-                          ? (closeTs - t.created_at)
-                          : 0;
-
-      // Agent name: tickets use admin_assignee_id (integer), not assignee.name
+                          ? closeTs - t.created_at : 0;
       const adminId   = String(t.admin_assignee_id ?? 0);
-      const agentName = (adminId === "0" || !t.admin_assignee_id)
+      const agentName = adminId === "0"
                           ? "Unassigned"
                           : (adminMap.get(adminId) ?? `Admin ${adminId}`);
-
-      return {
-        secs,
-        officeHours: isOfficeHours(t.created_at),
-        agentName,
-        slaMet: secs > 0 && secs <= SLA_SECS,
-      };
+      return { secs, officeHours: isOfficeHours(t.created_at), agentName, slaMet: secs > 0 && secs <= SLA_SECS, ticket: t };
     });
 
-    // Only include tickets with valid resolution time in SLA + avg calculations
     const withTime    = stats.filter(s => s.secs > 0);
     const allSecs     = withTime.map(s => s.secs);
     const officeSecs  = withTime.filter(s =>  s.officeHours).map(s => s.secs);
@@ -222,38 +234,50 @@ export async function GET(req: Request) {
     const slaMet      = withTime.filter(s =>  s.slaMet);
     const slaBreached = withTime.filter(s => !s.slaMet);
 
-    // ── By agent ─────────────────────────────────────────────────────────
+    // ── By agent ───────────────────────────────────────────────────────────
     type Acc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
-    const agentMap2 = new Map<string, Acc>();
-
+    const agentAccMap = new Map<string, Acc>();
     stats.forEach(({ agentName, secs, slaMet: met }) => {
-      if (!agentMap2.has(agentName))
-        agentMap2.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
-      const a = agentMap2.get(agentName)!;
+      if (!agentAccMap.has(agentName))
+        agentAccMap.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
+      const a = agentAccMap.get(agentName)!;
       a.resolved++;
-      if (secs > 0) {
-        a.totalSecs += secs;
-        if (met) a.slaMet++; else a.slaBreached++;
-      }
+      if (secs > 0) { a.totalSecs += secs; if (met) a.slaMet++; else a.slaBreached++; }
     });
 
-    const byAgent = [...agentMap2.entries()]
+    const byAgent = [...agentAccMap.entries()]
       .map(([name, a]) => {
-        const timedCount = a.slaMet + a.slaBreached;
+        const n = a.slaMet + a.slaBreached;
         return {
           name,
           resolved:         a.resolved,
-          avgResolutionFmt: timedCount > 0 ? fmt(a.totalSecs / timedCount) : "—",
+          avgResolutionFmt: n > 0 ? fmt(a.totalSecs / n) : "—",
           slaMet:           a.slaMet,
           slaBreaches:      a.slaBreached,
-          slaRate:          timedCount > 0
-                              ? +((a.slaMet / timedCount) * 100).toFixed(1)
-                              : 0,
+          slaRate:          n > 0 ? +((a.slaMet / n) * 100).toFixed(1) : 0,
         };
       })
       .sort((a, b) => b.resolved - a.resolved);
 
-    const slaBase = withTime.length;
+    // ── SLA breach details ─────────────────────────────────────────────────
+    const slaBreachDetails = slaBreached
+      .sort((a, b) => b.secs - a.secs) // worst breaches first
+      .slice(0, 100)
+      .map(s => {
+        const t = s.ticket;
+        const contact = t.contacts?.contacts?.[0];
+        return {
+          id:               t.id,
+          ticketId:         t.ticket_id ?? t.id,
+          ticketLink:       `https://app.intercom.com/a/apps/${APP_ID}/inbox/shared/all/ticket/${t.id}`,
+          contactRef:       contact?.external_id ?? contact?.id ?? "—",
+          ticketType:       t.ticket_type?.name ?? "—",
+          createdAt:        t.created_at,
+          resolvedAt:       t.updated_at ?? 0,
+          resolutionTimeFmt: fmt(s.secs),
+          resolvedBy:       s.agentName,
+        };
+      });
 
     return NextResponse.json({
       summary: {
@@ -262,8 +286,8 @@ export async function GET(req: Request) {
         open:                   open.length,
         slaMetCount:            slaMet.length,
         slaBreachCount:         slaBreached.length,
-        slaComplianceRate:      slaBase > 0
-                                  ? +((slaMet.length / slaBase) * 100).toFixed(1)
+        slaComplianceRate:      withTime.length > 0
+                                  ? +((slaMet.length / withTime.length) * 100).toFixed(1)
                                   : 0,
         avgResolutionFmt:       fmt(avg(allSecs)),
         avgOfficeHoursFmt:      officeSecs.length  ? fmt(avg(officeSecs))  : "—",
@@ -273,6 +297,8 @@ export async function GET(req: Request) {
       },
       byAgent,
       ticketTypes,
+      ticketTypeStats,
+      slaBreachDetails,
     });
   } catch (err) {
     return NextResponse.json(
