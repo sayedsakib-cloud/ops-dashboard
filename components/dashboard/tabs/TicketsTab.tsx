@@ -414,7 +414,7 @@ export default function TicketsTab() {
                               className="text-indigo-600 hover:underline font-medium text-xs"
                             >
                               #{b.ticketId}
-                            </a>
+                            <a href={b.ticketLink} target="_blank" rel="noopener noreferrer" className={`text-indigo-600 hover:underline font-medium text-xs`}>{"#"}{b.ticketId}</a>
                           </td>
                           <td className="px-4 py-2.5 text-xs text-gray-600 max-w-[180px] truncate" title={b.ticketType}>
                             {b.ticketType}
