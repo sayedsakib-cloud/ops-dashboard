@@ -58,8 +58,8 @@ async function fetchTickets(
   cAfter: number,
   cBefore: number,
 ): Promise<any[]> {
-  const token = process.env.INTERCOM_API_KEY;
-  if (!token) throw new Error("INTERCOM_API_KEY env var not set");
+  const token = process.env.INTERCOM_ACCESS_TOKEN;
+  if (!token) throw new Error("INTERCOM_ACCESS_TOKEN env var not set");
 
   const filters: any[] = [
     { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
