@@ -360,7 +360,7 @@ export default function TicketsTab() {
                     tick={{ fontSize: 11, fill: "#374151" }} tickLine={false} axisLine={false}
                   />
                   <Tooltip
-                    formatter={(v: number) => [v, "Tickets"]}
+                    formatter={(v: any) => [v, "Tickets"]}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
                   <Bar dataKey="count" radius={[0, 4, 4, 0]}>
