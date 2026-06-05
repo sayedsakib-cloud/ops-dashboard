@@ -9,7 +9,6 @@ const INBOX: Record<string, string> = {
 };
 const SLA_SECS = 24 * 3600;
 
-// Hardcoded ticket types per section (fallback + base list)
 const TICKET_TYPES: Record<string, string[]> = {
   cr: [
     "CR - Account Got Flagged But Email Was Not Sent",
@@ -37,16 +36,12 @@ function toUnixStart(d: string) {
 function toUnixEnd(d: string) {
   return Math.floor(new Date(d + "T23:59:59+06:00").getTime() / 1000);
 }
-
-/** Is this Unix timestamp within 9:00 AM – 5:00 PM GMT+6? */
 function isOfficeHours(ts: number): boolean {
   const d     = new Date(ts * 1000);
   const gmt6h = (d.getUTCHours() + 6) % 24;
   const mins  = gmt6h * 60 + d.getUTCMinutes();
-  return mins >= 540 && mins < 1020;
+  return mins >= 540 && mins < 1020; // 9 AM – 5 PM GMT+6
 }
-
-/** Seconds → "4h 23m" / "1d 2h" / "35m" */
 function fmt(secs: number): string {
   if (!secs || secs <= 0) return "—";
   const m = Math.round(secs / 60);
@@ -57,8 +52,8 @@ function fmt(secs: number): string {
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
 
-// ── Fetch from Intercom (only created_at in query; resolved filtered client-side) ──
-async function fetchConversations(
+// ── Fetch from Intercom Tickets API ───────────────────────────────────────
+async function fetchTickets(
   inboxId: string,
   cAfter: number,
   cBefore: number,
@@ -67,22 +62,22 @@ async function fetchConversations(
   if (!token) throw new Error("INTERCOM_ACCESS_TOKEN env var not set");
 
   const filters: any[] = [
-    { field: "team_assignee_id", operator: "=",  value: inboxId  },
-    { field: "created_at",       operator: ">",  value: cAfter   },
-    { field: "created_at",       operator: "<",  value: cBefore  },
+    { field: "team_assignee_id", operator: "=", value: inboxId  },
+    { field: "created_at",       operator: ">", value: cAfter   },
+    { field: "created_at",       operator: "<", value: cBefore  },
   ];
 
   const all: any[] = [];
   let cursor: string | null = null;
 
-  for (let p = 0; p < 10; p++) {           // max 1,500 conversations
+  for (let page = 0; page < 10; page++) {
     const body: any = {
       query:      { operator: "AND", value: filters },
       pagination: { per_page: 150 },
     };
     if (cursor) body.pagination.starting_after = cursor;
 
-    const res = await fetch(`${INTERCOM_API}/conversations/search`, {
+    const res = await fetch(`${INTERCOM_API}/tickets/search`, {
       method: "POST",
       headers: {
         Authorization:      `Bearer ${token}`,
@@ -97,8 +92,10 @@ async function fetchConversations(
       const txt = await res.text();
       throw new Error(`Intercom ${res.status}: ${txt}`);
     }
-    const data = await res.json();
-    all.push(...(data.conversations ?? []));
+
+    const data   = await res.json();
+    const items  = data.tickets ?? data.data ?? [];
+    all.push(...items);
     cursor = data.pages?.next?.starting_after ?? null;
     if (!cursor) break;
   }
@@ -125,17 +122,17 @@ export async function GET(req: Request) {
     const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
 
     const inboxId = INBOX[section] ?? INBOX.cr;
+    const tickets = await fetchTickets(inboxId, cAfter, cBefore);
 
-    // Fetch — only created_at used in Intercom query
-    const convs = await fetchConversations(inboxId, cAfter, cBefore);
-
-    // ── Client-side resolved date filter ──────────────────────────────────
-    let filtered = convs;
+    // ── Client-side resolved date filter ─────────────────────────────────
+    // Use ticket_state_updated_at (the timestamp when state last changed)
+    let filtered = tickets;
     if (resolvedFrom || resolvedTo) {
       const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : 0;
       const rBefore = resolvedTo   ? toUnixEnd(resolvedTo)     : Infinity;
-      filtered = filtered.filter(c => {
-        const closeTs = c.statistics?.first_close_at;
+      filtered = filtered.filter(t => {
+        if (t.ticket_state !== "resolved") return false;
+        const closeTs = t.ticket_state_updated_at;
         if (!closeTs) return false;
         if (rAfter  && closeTs < rAfter)  return false;
         if (rBefore && closeTs > rBefore) return false;
@@ -145,53 +142,49 @@ export async function GET(req: Request) {
 
     // ── Ticket type filter ────────────────────────────────────────────────
     if (typeFilter) {
-      filtered = filtered.filter(c => {
-        const tags = (c.tags?.tags ?? []).map((t: any) => t.name);
-        return tags.includes(typeFilter) || c.ticket_type?.name === typeFilter;
-      });
+      filtered = filtered.filter(t => t.ticket_type?.name === typeFilter);
     }
 
-    // ── Merge hardcoded types with any found dynamically ──────────────────
+    // ── Merge hardcoded + dynamic ticket types ────────────────────────────
     const dynamicTypes = new Set<string>();
-    convs.forEach(c => {
-      (c.tags?.tags ?? []).forEach((t: any) => { if (t.name) dynamicTypes.add(t.name); });
-      if (c.ticket_type?.name) dynamicTypes.add(c.ticket_type.name);
-    });
-    const base    = TICKET_TYPES[section] ?? [];
-    const extra   = [...dynamicTypes].filter(t => !base.includes(t)).sort();
+    tickets.forEach(t => { if (t.ticket_type?.name) dynamicTypes.add(t.ticket_type.name); });
+    const base  = TICKET_TYPES[section] ?? [];
+    const extra = [...dynamicTypes].filter(n => !base.includes(n)).sort();
     const ticketTypes = [...base, ...extra];
 
-    // ── Metrics ───────────────────────────────────────────────────────────
-    const resolved = filtered.filter(c => c.statistics?.first_close_at);
-    const open     = filtered.filter(c => !c.statistics?.first_close_at);
+    // ── Resolved vs open ─────────────────────────────────────────────────
+    const resolved = filtered.filter(t => t.ticket_state === "resolved");
+    const open     = filtered.filter(t => t.ticket_state !== "resolved");
 
+    // ── Per-ticket metrics ────────────────────────────────────────────────
     type Stat = { secs: number; officeHours: boolean; agentName: string; slaMet: boolean };
-    const stats: Stat[] = resolved.map(c => {
-      const secs =
-        c.statistics.time_to_first_close ??
-        (c.statistics.first_close_at - c.created_at);
+
+    const stats: Stat[] = resolved.map(t => {
+      // Resolution time: state_updated_at − created_at
+      const closeTs   = t.ticket_state_updated_at ?? 0;
+      const secs      = closeTs > 0 ? (closeTs - t.created_at) : 0;
       const agentName =
-        !c.assignee || c.assignee.type === "nobody_admin"
+        !t.assignee || t.assignee.type === "nobody_admin"
           ? "Unassigned"
-          : (c.assignee.name ?? "Unknown");
+          : (t.assignee.name ?? "Unknown");
       return {
         secs,
-        officeHours: isOfficeHours(c.created_at),
+        officeHours: isOfficeHours(t.created_at),
         agentName,
-        slaMet: secs <= SLA_SECS,
+        slaMet: secs > 0 && secs <= SLA_SECS,
       };
     });
 
     const avg = (arr: number[]) =>
       arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 
-    const allSecs     = stats.map(s => s.secs);
-    const officeSecs  = stats.filter(s =>  s.officeHours).map(s => s.secs);
-    const outsideSecs = stats.filter(s => !s.officeHours).map(s => s.secs);
+    const allSecs     = stats.filter(s => s.secs > 0).map(s => s.secs);
+    const officeSecs  = stats.filter(s =>  s.officeHours && s.secs > 0).map(s => s.secs);
+    const outsideSecs = stats.filter(s => !s.officeHours && s.secs > 0).map(s => s.secs);
     const slaMet      = stats.filter(s =>  s.slaMet);
-    const slaBreached = stats.filter(s => !s.slaMet);
+    const slaBreached = stats.filter(s => !s.slaMet && s.secs > 0);
 
-    // By agent
+    // ── By agent ──────────────────────────────────────────────────────────
     type Acc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
     const agentMap = new Map<string, Acc>();
     stats.forEach(({ agentName, secs, slaMet: met }) => {
@@ -207,10 +200,12 @@ export async function GET(req: Request) {
       .map(([name, a]) => ({
         name,
         resolved:         a.resolved,
-        avgResolutionFmt: fmt(a.totalSecs / a.resolved),
+        avgResolutionFmt: fmt(a.resolved > 0 ? a.totalSecs / a.resolved : 0),
         slaMet:           a.slaMet,
         slaBreaches:      a.slaBreached,
-        slaRate:          +((a.slaMet / a.resolved) * 100).toFixed(1),
+        slaRate:          a.resolved > 0
+                            ? +((a.slaMet / a.resolved) * 100).toFixed(1)
+                            : 0,
       }))
       .sort((a, b) => b.resolved - a.resolved);
 
