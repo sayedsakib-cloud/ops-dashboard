@@ -9,57 +9,80 @@ const INBOX: Record<string, string> = {
 };
 const SLA_SECS = 24 * 3600;
 
-// ── Date helpers ───────────────────────────────────────────────────────────
-function toUnixStart(d: string) { return Math.floor(new Date(d + "T00:00:00+06:00").getTime() / 1000); }
-function toUnixEnd(d: string)   { return Math.floor(new Date(d + "T23:59:59+06:00").getTime() / 1000); }
+// Hardcoded ticket types per section (fallback + base list)
+const TICKET_TYPES: Record<string, string[]> = {
+  cr: [
+    "CR - Account Got Flagged But Email Was Not Sent",
+    "CR - Need to Respond to Client's Email / Client Missed the Interview",
+    "CR - Case Requires Review",
+  ],
+  bizops: [
+    "BO - Change of Payout Address & Method",
+    "BO - Client facing RISE Work Issue",
+    "BO - Competition KYC",
+    "BO - Competition Payout address",
+    "BO - Complaint About Discrepancy in Profit Share",
+    "BO - KYC/Agreement Sign Done, Yet to Receive FundedNext Account/Unable to Sign Agreement",
+    "BO - Max Allocation Issue",
+    "BO - Need Update of KYC",
+    "BO - Veriff Doesn't Accept KYC Documents / Unable to Submit KYC Documents",
+    "BO - Need An Update Of Current Payout",
+  ],
+};
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function toUnixStart(d: string) {
+  return Math.floor(new Date(d + "T00:00:00+06:00").getTime() / 1000);
+}
+function toUnixEnd(d: string) {
+  return Math.floor(new Date(d + "T23:59:59+06:00").getTime() / 1000);
+}
 
 /** Is this Unix timestamp within 9:00 AM – 5:00 PM GMT+6? */
 function isOfficeHours(ts: number): boolean {
   const d     = new Date(ts * 1000);
   const gmt6h = (d.getUTCHours() + 6) % 24;
   const mins  = gmt6h * 60 + d.getUTCMinutes();
-  return mins >= 540 && mins < 1020; // 9*60=540, 17*60=1020
+  return mins >= 540 && mins < 1020;
 }
 
-/** Format seconds → human-readable (e.g. "4h 23m", "1d 2h") */
+/** Seconds → "4h 23m" / "1d 2h" / "35m" */
 function fmt(secs: number): string {
   if (!secs || secs <= 0) return "—";
   const m = Math.round(secs / 60);
-  if (m < 60)   return `${m}m`;
+  if (m < 60)  return `${m}m`;
   const h = Math.floor(m / 60), rm = m % 60;
-  if (h < 24)   return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
+  if (h < 24)  return rm > 0 ? `${h}h ${rm}m` : `${h}h`;
   const d = Math.floor(h / 24), rh = h % 24;
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
 
-// ── Intercom search with pagination ───────────────────────────────────────
+// ── Fetch from Intercom (only created_at in query; resolved filtered client-side) ──
 async function fetchConversations(
   inboxId: string,
-  cAfter?: number, cBefore?: number,
-  rAfter?: number, rBefore?: number,
+  cAfter: number,
+  cBefore: number,
 ): Promise<any[]> {
   const token = process.env.INTERCOM_ACCESS_TOKEN;
   if (!token) throw new Error("INTERCOM_ACCESS_TOKEN env var not set");
 
   const filters: any[] = [
-    { field: "team_assignee_id", operator: "=", value: inboxId },
+    { field: "team_assignee_id", operator: "=",  value: inboxId  },
+    { field: "created_at",       operator: ">",  value: cAfter   },
+    { field: "created_at",       operator: "<",  value: cBefore  },
   ];
-  if (cAfter)  filters.push({ field: "created_at",                operator: ">", value: cAfter  });
-  if (cBefore) filters.push({ field: "created_at",                operator: "<", value: cBefore });
-  if (rAfter)  filters.push({ field: "statistics.first_close_at", operator: ">", value: rAfter  });
-  if (rBefore) filters.push({ field: "statistics.first_close_at", operator: "<", value: rBefore });
 
   const all: any[] = [];
   let cursor: string | null = null;
 
-  for (let p = 0; p < 10; p++) {          // safety: max 1,500 conversations
+  for (let p = 0; p < 10; p++) {           // max 1,500 conversations
     const body: any = {
-      query: { operator: "AND", value: filters },
+      query:      { operator: "AND", value: filters },
       pagination: { per_page: 150 },
     };
     if (cursor) body.pagination.starting_after = cursor;
 
-    const res  = await fetch(`${INTERCOM_API}/conversations/search`, {
+    const res = await fetch(`${INTERCOM_API}/conversations/search`, {
       method: "POST",
       headers: {
         Authorization:      `Bearer ${token}`,
@@ -74,7 +97,6 @@ async function fetchConversations(
       const txt = await res.text();
       throw new Error(`Intercom ${res.status}: ${txt}`);
     }
-
     const data = await res.json();
     all.push(...(data.conversations ?? []));
     cursor = data.pages?.next?.starting_after ?? null;
@@ -83,7 +105,7 @@ async function fetchConversations(
   return all;
 }
 
-// ── Route handler ──────────────────────────────────────────────────────────
+// ── Route ──────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -97,41 +119,53 @@ export async function GET(req: Request) {
     const resolvedTo   = searchParams.get("resolvedTo")   ?? "";
     const typeFilter   = searchParams.get("type")         ?? "";
 
-    const now   = Math.floor(Date.now() / 1000);
-    const d30   = now - 30 * 86400;
-    const cAfter  = createdFrom  ? toUnixStart(createdFrom)  : d30;
-    const cBefore = createdTo    ? toUnixEnd(createdTo)      : now;
-    const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : undefined;
-    const rBefore = resolvedTo   ? toUnixEnd(resolvedTo)     : undefined;
+    const now    = Math.floor(Date.now() / 1000);
+    const d30    = now - 30 * 86400;
+    const cAfter  = createdFrom ? toUnixStart(createdFrom) : d30;
+    const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
 
     const inboxId = INBOX[section] ?? INBOX.cr;
-    const convs   = await fetchConversations(inboxId, cAfter, cBefore, rAfter, rBefore);
 
-    // ── Extract ticket types from tags + ticket_type field ──
-    const typeSet = new Set<string>();
+    // Fetch — only created_at used in Intercom query
+    const convs = await fetchConversations(inboxId, cAfter, cBefore);
+
+    // ── Client-side resolved date filter ──────────────────────────────────
+    let filtered = convs;
+    if (resolvedFrom || resolvedTo) {
+      const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : 0;
+      const rBefore = resolvedTo   ? toUnixEnd(resolvedTo)     : Infinity;
+      filtered = filtered.filter(c => {
+        const closeTs = c.statistics?.first_close_at;
+        if (!closeTs) return false;
+        if (rAfter  && closeTs < rAfter)  return false;
+        if (rBefore && closeTs > rBefore) return false;
+        return true;
+      });
+    }
+
+    // ── Ticket type filter ────────────────────────────────────────────────
+    if (typeFilter) {
+      filtered = filtered.filter(c => {
+        const tags = (c.tags?.tags ?? []).map((t: any) => t.name);
+        return tags.includes(typeFilter) || c.ticket_type?.name === typeFilter;
+      });
+    }
+
+    // ── Merge hardcoded types with any found dynamically ──────────────────
+    const dynamicTypes = new Set<string>();
     convs.forEach(c => {
-      (c.tags?.tags ?? []).forEach((t: any) => { if (t.name) typeSet.add(t.name); });
-      if (c.ticket_type?.name) typeSet.add(c.ticket_type.name);
+      (c.tags?.tags ?? []).forEach((t: any) => { if (t.name) dynamicTypes.add(t.name); });
+      if (c.ticket_type?.name) dynamicTypes.add(c.ticket_type.name);
     });
-    const ticketTypes = [...typeSet].sort();
+    const base    = TICKET_TYPES[section] ?? [];
+    const extra   = [...dynamicTypes].filter(t => !base.includes(t)).sort();
+    const ticketTypes = [...base, ...extra];
 
-    // ── Apply type filter ──
-    const filtered = typeFilter
-      ? convs.filter(c => {
-          const tags = (c.tags?.tags ?? []).map((t: any) => t.name);
-          return tags.includes(typeFilter) || c.ticket_type?.name === typeFilter;
-        })
-      : convs;
-
-    // ── Resolved vs open ──
+    // ── Metrics ───────────────────────────────────────────────────────────
     const resolved = filtered.filter(c => c.statistics?.first_close_at);
     const open     = filtered.filter(c => !c.statistics?.first_close_at);
 
-    // ── Resolution stats per ticket ──
-    type Stat = {
-      secs: number; officeHours: boolean;
-      agentName: string; slaMet: boolean;
-    };
+    type Stat = { secs: number; officeHours: boolean; agentName: string; slaMet: boolean };
     const stats: Stat[] = resolved.map(c => {
       const secs =
         c.statistics.time_to_first_close ??
@@ -157,9 +191,9 @@ export async function GET(req: Request) {
     const slaMet      = stats.filter(s =>  s.slaMet);
     const slaBreached = stats.filter(s => !s.slaMet);
 
-    // ── By agent ──
-    type AgentAcc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
-    const agentMap = new Map<string, AgentAcc>();
+    // By agent
+    type Acc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
+    const agentMap = new Map<string, Acc>();
     stats.forEach(({ agentName, secs, slaMet: met }) => {
       if (!agentMap.has(agentName))
         agentMap.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
@@ -172,12 +206,11 @@ export async function GET(req: Request) {
     const byAgent = [...agentMap.entries()]
       .map(([name, a]) => ({
         name,
-        resolved:          a.resolved,
-        avgResolutionFmt:  fmt(a.totalSecs / a.resolved),
-        avgResolutionSecs: Math.round(a.totalSecs / a.resolved),
-        slaMet:            a.slaMet,
-        slaBreaches:       a.slaBreached,
-        slaRate:           +((a.slaMet / a.resolved) * 100).toFixed(1),
+        resolved:         a.resolved,
+        avgResolutionFmt: fmt(a.totalSecs / a.resolved),
+        slaMet:           a.slaMet,
+        slaBreaches:      a.slaBreached,
+        slaRate:          +((a.slaMet / a.resolved) * 100).toFixed(1),
       }))
       .sort((a, b) => b.resolved - a.resolved);
 
