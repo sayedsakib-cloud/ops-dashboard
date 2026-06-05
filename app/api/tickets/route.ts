@@ -40,7 +40,7 @@ function isOfficeHours(ts: number): boolean {
   const d     = new Date(ts * 1000);
   const gmt6h = (d.getUTCHours() + 6) % 24;
   const mins  = gmt6h * 60 + d.getUTCMinutes();
-  return mins >= 540 && mins < 1020; // 9 AM – 5 PM GMT+6
+  return mins >= 540 && mins < 1020;
 }
 function fmt(secs: number): string {
   if (!secs || secs <= 0) return "—";
@@ -51,26 +51,48 @@ function fmt(secs: number): string {
   const d = Math.floor(h / 24), rh = h % 24;
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
+function avg(arr: number[]) {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
 
-// ── Fetch from Intercom Tickets API ───────────────────────────────────────
+// ── Fetch admins (to map admin_assignee_id → name) ─────────────────────────
+async function fetchAdminMap(token: string): Promise<Map<string, string>> {
+  try {
+    const res  = await fetch(`${INTERCOM_API}/admins`, {
+      headers: {
+        Authorization:      `Bearer ${token}`,
+        Accept:             "application/json",
+        "Intercom-Version": "2.11",
+      },
+    });
+    const data = await res.json();
+    const map  = new Map<string, string>();
+    (data.admins ?? []).forEach((a: any) => {
+      map.set(String(a.id), a.name ?? a.email ?? `Admin ${a.id}`);
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+// ── Fetch tickets with pagination ─────────────────────────────────────────
 async function fetchTickets(
+  token: string,
   inboxId: string,
   cAfter: number,
   cBefore: number,
 ): Promise<any[]> {
-  const token = process.env.INTERCOM_ACCESS_TOKEN;
-  if (!token) throw new Error("INTERCOM_ACCESS_TOKEN env var not set");
-
   const filters: any[] = [
     { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
-    { field: "created_at",       operator: ">", value: cAfter   },
-    { field: "created_at",       operator: "<", value: cBefore  },
+    { field: "created_at",       operator: ">", value: cAfter            },
+    { field: "created_at",       operator: "<", value: cBefore           },
   ];
 
   const all: any[] = [];
   let cursor: string | null = null;
 
-  for (let page = 0; page < 10; page++) {
+  for (let p = 0; p < 10; p++) {
     const body: any = {
       query:      { operator: "AND", value: filters },
       pagination: { per_page: 150 },
@@ -93,8 +115,8 @@ async function fetchTickets(
       throw new Error(`Intercom ${res.status}: ${txt}`);
     }
 
-    const data   = await res.json();
-    const items  = data.tickets ?? data.data ?? [];
+    const data  = await res.json();
+    const items = data.tickets ?? data.data ?? [];
     all.push(...items);
     cursor = data.pages?.next?.starting_after ?? null;
     if (!cursor) break;
@@ -116,23 +138,30 @@ export async function GET(req: Request) {
     const resolvedTo   = searchParams.get("resolvedTo")   ?? "";
     const typeFilter   = searchParams.get("type")         ?? "";
 
+    const token   = process.env.INTERCOM_ACCESS_TOKEN;
+    if (!token) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+
     const now    = Math.floor(Date.now() / 1000);
     const d30    = now - 30 * 86400;
     const cAfter  = createdFrom ? toUnixStart(createdFrom) : d30;
     const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
 
     const inboxId = INBOX[section] ?? INBOX.cr;
-    const tickets = await fetchTickets(inboxId, cAfter, cBefore);
 
-    // ── Client-side resolved date filter ─────────────────────────────────
-    // Use ticket_state_updated_at (the timestamp when state last changed)
+    // Fetch tickets + admins in parallel
+    const [tickets, adminMap] = await Promise.all([
+      fetchTickets(token, inboxId, cAfter, cBefore),
+      fetchAdminMap(token),
+    ]);
+
+    // ── Resolved date filter (client-side) ──────────────────────────────
     let filtered = tickets;
     if (resolvedFrom || resolvedTo) {
       const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : 0;
       const rBefore = resolvedTo   ? toUnixEnd(resolvedTo)     : Infinity;
       filtered = filtered.filter(t => {
-        if (t.ticket_state !== "resolved") return false;
-        const closeTs = t.ticket_state_updated_at;
+        if (t.open !== false && t.ticket_state !== "resolved") return false;
+        const closeTs = t.updated_at ?? 0;
         if (!closeTs) return false;
         if (rAfter  && closeTs < rAfter)  return false;
         if (rBefore && closeTs > rBefore) return false;
@@ -140,33 +169,43 @@ export async function GET(req: Request) {
       });
     }
 
-    // ── Ticket type filter ────────────────────────────────────────────────
+    // ── Ticket type filter ───────────────────────────────────────────────
     if (typeFilter) {
       filtered = filtered.filter(t => t.ticket_type?.name === typeFilter);
     }
 
-    // ── Merge hardcoded + dynamic ticket types ────────────────────────────
+    // ── Merge hardcoded + dynamic ticket types ───────────────────────────
     const dynamicTypes = new Set<string>();
     tickets.forEach(t => { if (t.ticket_type?.name) dynamicTypes.add(t.ticket_type.name); });
     const base  = TICKET_TYPES[section] ?? [];
     const extra = [...dynamicTypes].filter(n => !base.includes(n)).sort();
     const ticketTypes = [...base, ...extra];
 
-    // ── Resolved vs open ─────────────────────────────────────────────────
-    const resolved = filtered.filter(t => t.ticket_state === "resolved");
-    const open     = filtered.filter(t => t.ticket_state !== "resolved");
+    // ── Resolved vs open ────────────────────────────────────────────────
+    // open === false means resolved/closed in Intercom Tickets
+    const resolved = filtered.filter(t => t.open === false || t.ticket_state === "resolved");
+    const open     = filtered.filter(t => t.open !== false && t.ticket_state !== "resolved");
 
-    // ── Per-ticket metrics ────────────────────────────────────────────────
-    type Stat = { secs: number; officeHours: boolean; agentName: string; slaMet: boolean };
+    // ── Per-ticket metrics ───────────────────────────────────────────────
+    type Stat = {
+      secs: number; officeHours: boolean;
+      agentName: string; slaMet: boolean;
+    };
 
     const stats: Stat[] = resolved.map(t => {
-      // Resolution time: state_updated_at − created_at
-      const closeTs   = t.ticket_state_updated_at ?? 0;
-      const secs      = closeTs > 0 ? (closeTs - t.created_at) : 0;
-      const agentName =
-        !t.assignee || t.assignee.type === "nobody_admin"
-          ? "Unassigned"
-          : (t.assignee.name ?? "Unknown");
+      // Resolution time: updated_at is the last state change timestamp
+      // (ticket_state_updated_at doesn't exist in the API response)
+      const closeTs   = t.updated_at ?? 0;
+      const secs      = (closeTs > 0 && closeTs > t.created_at)
+                          ? (closeTs - t.created_at)
+                          : 0;
+
+      // Agent name: tickets use admin_assignee_id (integer), not assignee.name
+      const adminId   = String(t.admin_assignee_id ?? 0);
+      const agentName = (adminId === "0" || !t.admin_assignee_id)
+                          ? "Unassigned"
+                          : (adminMap.get(adminId) ?? `Admin ${adminId}`);
+
       return {
         secs,
         officeHours: isOfficeHours(t.created_at),
@@ -175,39 +214,46 @@ export async function GET(req: Request) {
       };
     });
 
-    const avg = (arr: number[]) =>
-      arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+    // Only include tickets with valid resolution time in SLA + avg calculations
+    const withTime    = stats.filter(s => s.secs > 0);
+    const allSecs     = withTime.map(s => s.secs);
+    const officeSecs  = withTime.filter(s =>  s.officeHours).map(s => s.secs);
+    const outsideSecs = withTime.filter(s => !s.officeHours).map(s => s.secs);
+    const slaMet      = withTime.filter(s =>  s.slaMet);
+    const slaBreached = withTime.filter(s => !s.slaMet);
 
-    const allSecs     = stats.filter(s => s.secs > 0).map(s => s.secs);
-    const officeSecs  = stats.filter(s =>  s.officeHours && s.secs > 0).map(s => s.secs);
-    const outsideSecs = stats.filter(s => !s.officeHours && s.secs > 0).map(s => s.secs);
-    const slaMet      = stats.filter(s =>  s.slaMet);
-    const slaBreached = stats.filter(s => !s.slaMet && s.secs > 0);
-
-    // ── By agent ──────────────────────────────────────────────────────────
+    // ── By agent ─────────────────────────────────────────────────────────
     type Acc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
-    const agentMap = new Map<string, Acc>();
+    const agentMap2 = new Map<string, Acc>();
+
     stats.forEach(({ agentName, secs, slaMet: met }) => {
-      if (!agentMap.has(agentName))
-        agentMap.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
-      const a = agentMap.get(agentName)!;
+      if (!agentMap2.has(agentName))
+        agentMap2.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
+      const a = agentMap2.get(agentName)!;
       a.resolved++;
-      a.totalSecs += secs;
-      if (met) a.slaMet++; else a.slaBreached++;
+      if (secs > 0) {
+        a.totalSecs += secs;
+        if (met) a.slaMet++; else a.slaBreached++;
+      }
     });
 
-    const byAgent = [...agentMap.entries()]
-      .map(([name, a]) => ({
-        name,
-        resolved:         a.resolved,
-        avgResolutionFmt: fmt(a.resolved > 0 ? a.totalSecs / a.resolved : 0),
-        slaMet:           a.slaMet,
-        slaBreaches:      a.slaBreached,
-        slaRate:          a.resolved > 0
-                            ? +((a.slaMet / a.resolved) * 100).toFixed(1)
-                            : 0,
-      }))
+    const byAgent = [...agentMap2.entries()]
+      .map(([name, a]) => {
+        const timedCount = a.slaMet + a.slaBreached;
+        return {
+          name,
+          resolved:         a.resolved,
+          avgResolutionFmt: timedCount > 0 ? fmt(a.totalSecs / timedCount) : "—",
+          slaMet:           a.slaMet,
+          slaBreaches:      a.slaBreached,
+          slaRate:          timedCount > 0
+                              ? +((a.slaMet / timedCount) * 100).toFixed(1)
+                              : 0,
+        };
+      })
       .sort((a, b) => b.resolved - a.resolved);
+
+    const slaBase = withTime.length;
 
     return NextResponse.json({
       summary: {
@@ -216,8 +262,8 @@ export async function GET(req: Request) {
         open:                   open.length,
         slaMetCount:            slaMet.length,
         slaBreachCount:         slaBreached.length,
-        slaComplianceRate:      resolved.length
-                                  ? +((slaMet.length / resolved.length) * 100).toFixed(1)
+        slaComplianceRate:      slaBase > 0
+                                  ? +((slaMet.length / slaBase) * 100).toFixed(1)
                                   : 0,
         avgResolutionFmt:       fmt(avg(allSecs)),
         avgOfficeHoursFmt:      officeSecs.length  ? fmt(avg(officeSecs))  : "—",
