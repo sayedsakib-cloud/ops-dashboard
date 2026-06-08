@@ -131,18 +131,46 @@ export async function GET(req: Request) {
       return Object.values(B).slice(1).some((idx) => row[idx]?.trim());
     });
 
-    // Resolve target date
-    let targetDate = dateParam && bizMap.has(dateParam) ? dateParam : null;
-    if (!targetDate) targetDate = datesWithData[datesWithData.length - 1] ?? null;
-    if (!targetDate) return NextResponse.json({ error: "No data available" }, { status: 404 });
+    // Resolve date range
+    const lastDate  = datesWithData[datesWithData.length - 1] ?? null;
+    if (!lastDate) return NextResponse.json({ error: "No data available" }, { status: 404 });
 
-    const tIdx = datesWithData.indexOf(targetDate);
-    const prevDate = tIdx > 0 ? datesWithData[tIdx - 1] : null;
+    const rangeEnd   = (effectiveEnd   && datesWithData.includes(effectiveEnd))   ? effectiveEnd   : lastDate;
+    const rangeStart = (effectiveStart && datesWithData.includes(effectiveStart)) ? effectiveStart : rangeEnd;
 
-    const br = bizMap.get(targetDate) ?? [];
-    const bp = prevDate ? (bizMap.get(prevDate) ?? []) : [];
-    const cr = crMap.get(targetDate) ?? [];
-    const cp = prevDate ? (crMap.get(prevDate) ?? []) : [];
+    // Collect all days in range
+    const startIdx   = datesWithData.indexOf(rangeStart);
+    const endIdx     = datesWithData.indexOf(rangeEnd);
+    const rangeDays  = datesWithData.slice(startIdx, endIdx + 1);
+    const rangeLen   = rangeDays.length;
+
+    // Previous period of same length for % comparison
+    const prevStart  = startIdx >= rangeLen ? datesWithData[startIdx - rangeLen] : null;
+    const prevEnd    = startIdx > 0          ? datesWithData[startIdx - 1]        : null;
+    const prevDays   = prevStart && prevEnd
+      ? datesWithData.slice(datesWithData.indexOf(prevStart), datesWithData.indexOf(prevEnd) + 1)
+      : [];
+
+    // Aggregate helper: sum numeric values across days, or pick last day for "current" metrics
+    function agg(days: string[], map: Map<string, string[]>, idx: number, mode: "sum"|"max"|"last" = "sum"): string {
+      const vals = days.map(d => map.get(d)?.[idx]).filter(Boolean) as string[];
+      if (!vals.length) return "";
+      const nums = vals.map(v => parseFloat(v.replace(/[$,]/g, "").replace(/\s*hr[s]?/i, ""))).filter(n => !isNaN(n));
+      if (!nums.length) return "";
+      if (mode === "max")  return String(Math.max(...nums));
+      if (mode === "last") return vals[vals.length - 1];
+      return String(nums.reduce((a, b) => a + b, 0));
+    }
+
+    // Current period aggregated values
+    const br = (idx: number, mode?: "sum"|"max"|"last") => agg(rangeDays, bizMap, idx, mode);
+    const cr = (idx: number, mode?: "sum"|"max"|"last") => agg(rangeDays, crMap,  idx, mode);
+    // Previous period
+    const bp = (idx: number, mode?: "sum"|"max"|"last") => agg(prevDays, bizMap, idx, mode);
+    const cp = (idx: number, mode?: "sum"|"max"|"last") => agg(prevDays, crMap,  idx, mode);
+
+    const targetDate = rangeEnd;   // for backward compat
+    const prevDate   = prevEnd;
 
     return NextResponse.json({
       date: targetDate,
