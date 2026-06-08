@@ -6,6 +6,9 @@ type Metric = { label: string; value: number | null; change: number | null; form
 type HuddleData = {
   date: string;
   prevDate: string | null;
+  rangeStart: string;
+  rangeEnd: string;
+  rangeDays: number;
   availableDates: string[];
   bizops: Metric[];
   bizopsEligible: { fnProcessed: Metric; eligibleKYC: Metric; eligiblePayout: Metric };
@@ -56,13 +59,17 @@ export default function DailyHuddleTab() {
   const [data, setData] = useState<HuddleData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedDate, setSelectedDate] = useState("");
+  const [rangeStart, setRangeStart] = useState("");
+  const [rangeEnd,   setRangeEnd]   = useState("");
 
-  async function load(date?: string) {
+  async function load(start?: string, end?: string) {
     setLoading(true);
     setError(null);
     try {
-      const url = "/api/dailyhuddle" + (date ? `?date=${date}` : "");
+      const p = new URLSearchParams();
+      if (start) p.set("startDate", start);
+      if (end)   p.set("endDate",   end);
+      const url = "/api/dailyhuddle" + (p.toString() ? `?${p}` : "");
       const res = await fetch(url);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load");
@@ -98,18 +105,34 @@ export default function DailyHuddleTab() {
       <div className="bg-white rounded-lg shadow-sm px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-xl font-bold text-gray-900">Daily Huddle — Operations</h1>
         <div className="flex items-center gap-2">
-          <label className="text-sm text-gray-500 font-medium">Date</label>
-          <input
-            type="date"
-            value={selectedDate}
-            min={data.availableDates[0]}
-            max={data.availableDates[data.availableDates.length - 1]}
-            onChange={(e) => load(e.target.value)}
-            className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-          />
-          {data.prevDate && (
+            <label className="text-xs text-gray-500 font-medium">From</label>
+            <input
+              type="date"
+              value={rangeStart || data.rangeStart}
+              min={data.availableDates[0]}
+              max={data.availableDates[data.availableDates.length - 1]}
+              onChange={e => setRangeStart(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+            <label className="text-xs text-gray-500 font-medium">To</label>
+            <input
+              type="date"
+              value={rangeEnd || data.rangeEnd}
+              min={data.availableDates[0]}
+              max={data.availableDates[data.availableDates.length - 1]}
+              onChange={e => setRangeEnd(e.target.value)}
+              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+            />
+            <button
+              onClick={() => load(rangeStart || data.rangeStart, rangeEnd || data.rangeEnd)}
+              className="px-3 py-1.5 bg-indigo-600 text-white text-xs font-medium rounded-md hover:bg-indigo-700 transition-colors"
+            >
+              Apply
+            </button>
+          </div>
+          {data.rangeDays > 1 && (
             <span className="text-xs text-gray-400 hidden md:inline">
-              % vs {fmtDate(data.prevDate)}
+              {data.rangeDays}-day range · vs prior {data.rangeDays} days
             </span>
           )}
         </div>
