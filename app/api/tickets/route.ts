@@ -61,6 +61,42 @@ function avg(arr: number[]) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
+/**
+ * Extract the resolver from ticket_parts (who changed state to "resolved").
+ * Falls back to last admin interaction, then admin_assignee_id.
+ * This is far more accurate than admin_assignee_id alone, which is often 0.
+ */
+function getResolver(ticket: any, adminMap: Map<string, string>): string {
+  const parts: any[] = ticket.ticket_parts?.ticket_parts ?? [];
+
+  // Pass 1: find the part where ticket_state became "resolved"
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (
+      p.ticket_state === "resolved" &&
+      p.author?.type === "admin" &&
+      p.author?.name &&
+      p.author.name !== "Deleted Author"
+    ) return p.author.name;
+  }
+
+  // Pass 2: last admin who touched the ticket at all
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (
+      p.author?.type === "admin" &&
+      p.author?.name &&
+      p.author.name !== "Deleted Author"
+    ) return p.author.name;
+  }
+
+  // Pass 3: admin_assignee_id fallback
+  const adminId = String(ticket.admin_assignee_id ?? 0);
+  return adminId !== "0"
+    ? (adminMap.get(adminId) ?? `Admin ${adminId}`)
+    : "Unassigned";
+}
+
 // ── Fetch admins → id→name map ─────────────────────────────────────────────
 async function fetchAdminMap(token: string): Promise<{ map: Map<string, string>; admins: any[] }> {
   try {
@@ -221,9 +257,8 @@ export async function GET(req: Request) {
       const secs      = (closeTs > 0 && closeTs > t.created_at)
                           ? closeTs - t.created_at : 0;
       const adminId   = String(t.admin_assignee_id ?? 0);
-      const agentName = adminId === "0"
-                          ? "Unassigned"
-                          : (adminMap.get(adminId) ?? `Admin ${adminId}`);
+      const agentName = getResolver(t, adminMap);
+      
       return { secs, officeHours: isOfficeHours(t.created_at), agentName, slaMet: secs > 0 && secs <= SLA_SECS, ticket: t };
     });
 
