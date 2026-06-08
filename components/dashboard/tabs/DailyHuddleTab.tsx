@@ -135,6 +135,7 @@ export default function DailyHuddleTab() {
               {data.rangeDays}-day range · vs prior {data.rangeDays} days
             </span>
           )}
+        </div>
       </div>
 
       <div className="rounded-lg overflow-hidden shadow-sm">
