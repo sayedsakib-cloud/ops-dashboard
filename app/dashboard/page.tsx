@@ -1,34 +1,48 @@
 "use client";
 import { useState } from "react";
-import DailyHuddleTab from "@/components/dashboard/tabs/DailyHuddleTab";
-import KPITab from "@/components/dashboard/tabs/KPITab";
-import RegularTaskTab from "@/components/dashboard/tabs/RegularTaskTab";
-import TicketsTab from "@/components/dashboard/tabs/TicketsTab";
+import DailyHuddleTab   from "@/components/dashboard/tabs/DailyHuddleTab";
+import KPITab           from "@/components/dashboard/tabs/KPITab";
+import RegularTaskTab   from "@/components/dashboard/tabs/RegularTaskTab";
+import TicketsTab       from "@/components/dashboard/tabs/TicketsTab";
 import TradingEthicsTab from "@/components/dashboard/tabs/TradingEthicsTab";
 
 const TABS = [
-  { id: "daily-huddle", label: "Daily Huddle" },
-  { id: "kpi", label: "KPI" },
-  { id: "regular-task", label: "Regular Task" },
-  { id: "tickets", label: "Tickets" },
+  { id: "daily-huddle",   label: "Daily Huddle"                     },
+  { id: "kpi",            label: "KPI"                              },
+  { id: "regular-task",   label: "Regular Task"                     },
+  { id: "tickets",        label: "Tickets"                          },
   { id: "trading-ethics", label: "Trading Ethics Email Performance" },
 ];
 
 export default function DashboardPage() {
-  const [activeTab, setActiveTab] = useState("daily-huddle");
+  const [active,  setActive]  = useState("daily-huddle");
+  // Record-based: tabs are never removed once mounted
+  const [mounted, setMounted] = useState<Record<string, boolean>>({
+    "daily-huddle": true,
+  });
+
+  function switchTab(id: string) {
+    setActive(id);
+    // Only update state if not already mounted (avoids unnecessary re-render)
+    if (!mounted[id]) setMounted(prev => ({ ...prev, [id]: true }));
+  }
+
+  // Inline style — cannot be overridden by any CSS class
+  const vis = (id: string): React.CSSProperties =>
+    ({ display: active === id ? "block" : "none" });
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Tab Bar */}
+      {/* Tab bar */}
       <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
         <div className="max-w-screen-2xl mx-auto px-6">
-          <nav className="flex overflow-x-auto scrollbar-hide">
-            {TABS.map((tab) => (
+          <nav className="flex overflow-x-auto">
+            {TABS.map(tab => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => switchTab(tab.id)}
                 className={`px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors focus:outline-none ${
-                  activeTab === tab.id
+                  active === tab.id
                     ? "border-indigo-600 text-indigo-600"
                     : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
                 }`}
@@ -40,13 +54,23 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Tab Content */}
+      {/* Content — mount once, persist via inline style toggle */}
       <div className="max-w-screen-2xl mx-auto px-6 py-6">
-        {activeTab === "daily-huddle" && <DailyHuddleTab />}
-        {activeTab === "kpi" && <KPITab />}
-        {activeTab === "regular-task" && <RegularTaskTab />}
-        {activeTab === "tickets" && <TicketsTab />}
-        {activeTab === "trading-ethics" && <TradingEthicsTab />}
+        <div style={vis("daily-huddle")}>
+          {mounted["daily-huddle"] && <DailyHuddleTab />}
+        </div>
+        <div style={vis("kpi")}>
+          {mounted["kpi"] && <KPITab />}
+        </div>
+        <div style={vis("regular-task")}>
+          {mounted["regular-task"] && <RegularTaskTab />}
+        </div>
+        <div style={vis("tickets")}>
+          {mounted["tickets"] && <TicketsTab />}
+        </div>
+        <div style={vis("trading-ethics")}>
+          {mounted["trading-ethics"] && <TradingEthicsTab />}
+        </div>
       </div>
     </div>
   );
