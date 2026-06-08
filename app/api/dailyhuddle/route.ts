@@ -86,7 +86,12 @@ export async function GET(req: Request) {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
-    const dateParam = searchParams.get("date");
+    const startParam = searchParams.get("startDate");
+    const endParam   = searchParams.get("endDate");
+    // Legacy single-date support
+    const dateParam  = searchParams.get("date");
+    const effectiveStart = startParam ?? dateParam ?? null;
+    const effectiveEnd   = endParam   ?? dateParam ?? null;
     const spreadsheetId = process.env.DAILY_HUDDLE_SPREADSHEET_ID;
     if (!spreadsheetId) throw new Error("DAILY_HUDDLE_SPREADSHEET_ID not set");
 
