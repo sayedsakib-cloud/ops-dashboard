@@ -1,14 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextResponse }    from "next/server";
 import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
+import { authOptions }      from "@/lib/auth";
+import { unstable_cache }   from "next/cache";
 
-const INTERCOM_API  = "https://api.intercom.io";
-const APP_ID        = "aphmhtyj"; // for ticket deep-links
-const SLA_SECS      = 24 * 3600;
+const INTERCOM_API = "https://api.intercom.io";
+const APP_ID       = "aphmhtyj";
+const SLA_SECS     = 24 * 3600;
 
-const INBOX: Record<string, string> = { cr: "6547584", bizops: "8314220" };
+const INBOX: Record<string, string> = {
+  cr:     "6547584",
+  bizops: "8314220",
+};
 
-// Known agents per section — used for name-matching & combined query
 const SECTION_AGENTS: Record<string, string[]> = {
   cr:     ["samael", "camellia warren", "anna linhart"],
   bizops: ["oliver ellison", "luna parker", "paul wilson", "sienna clarke",
@@ -61,15 +64,11 @@ function avg(arr: number[]) {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
-/**
- * Extract the resolver from ticket_parts (who changed state to "resolved").
- * Falls back to last admin interaction, then admin_assignee_id.
- * This is far more accurate than admin_assignee_id alone, which is often 0.
- */
+/** Who resolved the ticket — reads ticket_parts history, more accurate than admin_assignee_id */
 function getResolver(ticket: any, adminMap: Map<string, string>): string {
   const parts: any[] = ticket.ticket_parts?.ticket_parts ?? [];
 
-  // Pass 1: find the part where ticket_state became "resolved"
+  // Pass 1 — find the part that explicitly set state to "resolved"
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
     if (
@@ -80,7 +79,7 @@ function getResolver(ticket: any, adminMap: Map<string, string>): string {
     ) return p.author.name;
   }
 
-  // Pass 2: last admin who touched the ticket at all
+  // Pass 2 — last admin who touched the ticket (heuristic: most recent action = resolver)
   for (let i = parts.length - 1; i >= 0; i--) {
     const p = parts[i];
     if (
@@ -90,35 +89,42 @@ function getResolver(ticket: any, adminMap: Map<string, string>): string {
     ) return p.author.name;
   }
 
-  // Pass 3: admin_assignee_id fallback
+  // Pass 3 — admin_assignee_id fallback
   const adminId = String(ticket.admin_assignee_id ?? 0);
   return adminId !== "0"
     ? (adminMap.get(adminId) ?? `Admin ${adminId}`)
     : "Unassigned";
 }
 
-import { unstable_cache } from "next/cache";
-
-// ── Cached admin fetch (1 hour TTL — admins rarely change) ─────────────────
+// ── Server-side cache: admins (1-hour TTL — rarely change) ────────────────
 const getCachedAdmins = unstable_cache(
   async (): Promise<{ nameMap: Record<string, string>; admins: any[] }> => {
     const token = process.env.INTERCOM_ACCESS_TOKEN!;
-    const res   = await fetch(`${INTERCOM_API}/admins`, {
-      headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
-    });
-    const data  = await res.json();
-    const list  = data.admins ?? [];
-    const nameMap: Record<string, string> = {};
-    list.forEach((a: any) => { nameMap[String(a.id)] = a.name ?? a.email ?? `Admin ${a.id}`; });
-    return { nameMap, admins: list };
+    try {
+      const res  = await fetch(`${INTERCOM_API}/admins`, {
+        headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
+      });
+      const data = await res.json();
+      const list = (data.admins ?? []) as any[];
+      const nameMap: Record<string, string> = {};
+      list.forEach(a => { nameMap[String(a.id)] = a.name ?? a.email ?? `Admin ${a.id}`; });
+      return { nameMap, admins: list };
+    } catch {
+      return { nameMap: {}, admins: [] };
+    }
   },
   ["intercom-admins"],
   { revalidate: 3600 }
 );
 
-// ── Cached ticket fetch (5 min TTL) ────────────────────────────────────────
+// ── Server-side cache: tickets (5-min TTL) ────────────────────────────────
 const getCachedTickets = unstable_cache(
-  async (inboxId: string, agentIdsJson: string, cAfter: number, cBefore: number): Promise<any[]> => {
+  async (
+    inboxId:      string,
+    agentIdsJson: string,
+    cAfter:       number,
+    cBefore:      number,
+  ): Promise<any[]> => {
     const token    = process.env.INTERCOM_ACCESS_TOKEN!;
     const agentIds = JSON.parse(agentIdsJson) as number[];
 
@@ -126,6 +132,7 @@ const getCachedTickets = unstable_cache(
       { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
       ...agentIds.map(id => ({ field: "admin_assignee_id", operator: "=", value: id })),
     ];
+
     const query = {
       operator: "AND",
       value: [
@@ -134,25 +141,36 @@ const getCachedTickets = unstable_cache(
         { field: "created_at", operator: "<", value: cBefore },
       ],
     };
-    const all: any[] = [];
-    const seen = new Set<string>();
+
+    const all: any[]       = [];
+    const seen             = new Set<string>();
     let cursor: string | null = null;
+
     for (let p = 0; p < 15; p++) {
       const body: any = { query, pagination: { per_page: 150 } };
       if (cursor) body.pagination.starting_after = cursor;
-      const res  = await fetch(`${INTERCOM_API}/tickets/search`, {
+
+      const res = await fetch(`${INTERCOM_API}/tickets/search`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+          Authorization:      `Bearer ${token}`,
+          "Content-Type":     "application/json",
           "Intercom-Version": "2.11",
         },
         body: JSON.stringify(body),
       });
-      if (!res.ok) { const t = await res.text(); throw new Error(`Intercom ${res.status}: ${t}`); }
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Intercom ${res.status}: ${txt}`);
+      }
+
       const data  = await res.json();
-      const items = data.tickets ?? data.data ?? [];
-      for (const t of items) { if (!seen.has(t.id)) { seen.add(t.id); all.push(t); } }
+      const items = (data.tickets ?? data.data ?? []) as any[];
+      for (const t of items) {
+        if (!seen.has(t.id)) { seen.add(t.id); all.push(t); }
+      }
+
       cursor = data.pages?.next?.starting_after ?? null;
       if (!cursor) break;
     }
@@ -161,67 +179,6 @@ const getCachedTickets = unstable_cache(
   ["intercom-tickets"],
   { revalidate: 300 }
 );
-
-// ── Legacy direct fetch (kept for internal use) ─────────────────────────────
-async function fetchAdminMap(token: string): Promise<{ map: Map<string, string>; admins: any[] }> {
-
-// ── Fetch tickets (combined: team OR known agents) ─────────────────────────
-async function fetchTickets(
-  token: string,
-  inboxId: string,
-  agentIds: number[],
-  cAfter: number,
-  cBefore: number,
-): Promise<any[]> {
-  // Build OR clause: team_assignee_id OR any known agent
-  const orClauses: any[] = [
-    { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
-    ...agentIds.map(id => ({ field: "admin_assignee_id", operator: "=", value: id })),
-  ];
-
-  const query = {
-    operator: "AND",
-    value: [
-      orClauses.length > 1 ? { operator: "OR", value: orClauses } : orClauses[0],
-      { field: "created_at", operator: ">", value: cAfter  },
-      { field: "created_at", operator: "<", value: cBefore },
-    ],
-  };
-
-  const all: any[] = [];
-  const seen = new Set<string>();
-  let cursor: string | null = null;
-
-  for (let p = 0; p < 15; p++) { // up to 2250 tickets
-    const body: any = { query, pagination: { per_page: 150 } };
-    if (cursor) body.pagination.starting_after = cursor;
-
-    const res = await fetch(`${INTERCOM_API}/tickets/search`, {
-      method: "POST",
-      headers: {
-        Authorization:      `Bearer ${token}`,
-        "Content-Type":     "application/json",
-        "Intercom-Version": "2.11",
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const txt = await res.text();
-      throw new Error(`Intercom ${res.status}: ${txt}`);
-    }
-    const data  = await res.json();
-    const items = data.tickets ?? data.data ?? [];
-
-    // Deduplicate (OR query can return duplicates)
-    for (const t of items) {
-      if (!seen.has(t.id)) { seen.add(t.id); all.push(t); }
-    }
-
-    cursor = data.pages?.next?.starting_after ?? null;
-    if (!cursor) break;
-  }
-  return all;
-}
 
 // ── Route ──────────────────────────────────────────────────────────────────
 export async function GET(req: Request) {
@@ -237,8 +194,8 @@ export async function GET(req: Request) {
     const resolvedTo   = searchParams.get("resolvedTo")   ?? "";
     const typeFilter   = searchParams.get("type")         ?? "";
 
-    const token = process.env.INTERCOM_ACCESS_TOKEN;
-    if (!token) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+    if (!process.env.INTERCOM_ACCESS_TOKEN)
+      throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
     const now    = Math.floor(Date.now() / 1000);
     const d30    = now - 30 * 86400;
@@ -246,11 +203,13 @@ export async function GET(req: Request) {
     const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
     const inboxId = INBOX[section] ?? INBOX.cr;
 
-    // ── Fetch admins + resolve agent IDs for this section (parallel) ───────
-    const { map: adminMap, admins } = await fetchAdminMap(token);
+    // ── Step 1: cached admin list (fast after first call) ──────────────────
+    const { nameMap, admins: adminList } = await getCachedAdmins();
+    const adminMap = new Map(Object.entries(nameMap));
 
+    // Resolve agent IDs for this section via name matching
     const sectionAgentNames = SECTION_AGENTS[section] ?? [];
-    const agentIds = admins
+    const agentIds = adminList
       .filter((a: any) => {
         const name = (a.name ?? "").toLowerCase();
         return sectionAgentNames.some(n => name.includes(n) || n.includes(name));
@@ -258,10 +217,15 @@ export async function GET(req: Request) {
       .map((a: any) => parseInt(a.id))
       .filter(Boolean);
 
-    // ── Fetch tickets ──────────────────────────────────────────────────────
-    const tickets = await fetchTickets(token, inboxId, agentIds, cAfter, cBefore);
+    // ── Step 2: cached tickets (fast after first call for same params) ─────
+    const tickets = await getCachedTickets(
+      inboxId,
+      JSON.stringify(agentIds.sort((a, b) => a - b)), // sorted for stable cache key
+      cAfter,
+      cBefore,
+    );
 
-    // ── Client-side resolved date filter ───────────────────────────────────
+    // ── Resolved date filter (client-side) ─────────────────────────────────
     let filtered = tickets;
     if (resolvedFrom || resolvedTo) {
       const rAfter  = resolvedFrom ? toUnixStart(resolvedFrom) : 0;
@@ -269,8 +233,8 @@ export async function GET(req: Request) {
       filtered = filtered.filter(t => {
         if (t.open !== false && t.ticket_state !== "resolved") return false;
         const closeTs = t.updated_at ?? 0;
-        if (!closeTs) return false;
-        if (rAfter  && closeTs < rAfter)  return false;
+        if (!closeTs)                    return false;
+        if (rAfter  && closeTs < rAfter) return false;
         if (rBefore && closeTs > rBefore) return false;
         return true;
       });
@@ -281,7 +245,7 @@ export async function GET(req: Request) {
       filtered = filtered.filter(t => t.ticket_type?.name === typeFilter);
     }
 
-    // ── Ticket types for dropdown + chart ──────────────────────────────────
+    // ── Ticket type stats for chart + dropdown ─────────────────────────────
     const typeCountMap = new Map<string, number>();
     filtered.forEach(t => {
       const name = t.ticket_type?.name;
@@ -299,19 +263,22 @@ export async function GET(req: Request) {
     const resolved = filtered.filter(t => t.open === false || t.ticket_state === "resolved");
     const open     = filtered.filter(t => t.open !== false && t.ticket_state !== "resolved");
 
-    // ── Per-ticket stats ───────────────────────────────────────────────────
+    // ── Per-ticket metrics ─────────────────────────────────────────────────
     type Stat = {
       secs: number; officeHours: boolean;
       agentName: string; slaMet: boolean; ticket: any;
     };
     const stats: Stat[] = resolved.map(t => {
       const closeTs   = t.updated_at ?? 0;
-      const secs      = (closeTs > 0 && closeTs > t.created_at)
-                          ? closeTs - t.created_at : 0;
-      const adminId   = String(t.admin_assignee_id ?? 0);
+      const secs      = closeTs > 0 && closeTs > t.created_at ? closeTs - t.created_at : 0;
       const agentName = getResolver(t, adminMap);
-      
-      return { secs, officeHours: isOfficeHours(t.created_at), agentName, slaMet: secs > 0 && secs <= SLA_SECS, ticket: t };
+      return {
+        secs,
+        officeHours: isOfficeHours(t.created_at),
+        agentName,
+        slaMet: secs > 0 && secs <= SLA_SECS,
+        ticket: t,
+      };
     });
 
     const withTime    = stats.filter(s => s.secs > 0);
@@ -348,39 +315,39 @@ export async function GET(req: Request) {
 
     // ── SLA breach details ─────────────────────────────────────────────────
     const slaBreachDetails = slaBreached
-      .sort((a, b) => b.secs - a.secs) // worst breaches first
+      .sort((a, b) => b.secs - a.secs)
       .slice(0, 100)
       .map(s => {
-        const t = s.ticket;
+        const t       = s.ticket;
         const contact = t.contacts?.contacts?.[0];
         return {
-          id:               t.id,
-          ticketId:         t.ticket_id ?? t.id,
-          ticketLink:       `https://app.intercom.com/a/apps/${APP_ID}/inbox/shared/all/ticket/${t.id}`,
-          contactRef:       contact?.external_id ?? contact?.id ?? "—",
-          ticketType:       t.ticket_type?.name ?? "—",
-          createdAt:        t.created_at,
-          resolvedAt:       t.updated_at ?? 0,
+          id:                t.id,
+          ticketId:          t.ticket_id ?? t.id,
+          ticketLink:        `https://app.intercom.com/a/apps/${APP_ID}/inbox/shared/all/ticket/${t.id}`,
+          contactRef:        contact?.external_id ?? contact?.id ?? "—",
+          ticketType:        t.ticket_type?.name ?? "—",
+          createdAt:         t.created_at,
+          resolvedAt:        t.updated_at ?? 0,
           resolutionTimeFmt: fmt(s.secs),
-          resolvedBy:       s.agentName,
+          resolvedBy:        s.agentName,
         };
       });
 
     return NextResponse.json({
       summary: {
-        total:                  filtered.length,
-        resolved:               resolved.length,
-        open:                   open.length,
-        slaMetCount:            slaMet.length,
-        slaBreachCount:         slaBreached.length,
-        slaComplianceRate:      withTime.length > 0
-                                  ? +((slaMet.length / withTime.length) * 100).toFixed(1)
-                                  : 0,
-        avgResolutionFmt:       fmt(avg(allSecs)),
-        avgOfficeHoursFmt:      officeSecs.length  ? fmt(avg(officeSecs))  : "—",
-        avgOfficeHoursCount:    officeSecs.length,
-        avgOutsideHoursFmt:     outsideSecs.length ? fmt(avg(outsideSecs)) : "—",
-        avgOutsideHoursCount:   outsideSecs.length,
+        total:                 filtered.length,
+        resolved:              resolved.length,
+        open:                  open.length,
+        slaMetCount:           slaMet.length,
+        slaBreachCount:        slaBreached.length,
+        slaComplianceRate:     withTime.length > 0
+                                 ? +((slaMet.length / withTime.length) * 100).toFixed(1)
+                                 : 0,
+        avgResolutionFmt:      fmt(avg(allSecs)),
+        avgOfficeHoursFmt:     officeSecs.length  ? fmt(avg(officeSecs))  : "—",
+        avgOfficeHoursCount:   officeSecs.length,
+        avgOutsideHoursFmt:    outsideSecs.length ? fmt(avg(outsideSecs)) : "—",
+        avgOutsideHoursCount:  outsideSecs.length,
       },
       byAgent,
       ticketTypes,
@@ -390,7 +357,7 @@ export async function GET(req: Request) {
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
