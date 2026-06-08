@@ -97,21 +97,73 @@ function getResolver(ticket: any, adminMap: Map<string, string>): string {
     : "Unassigned";
 }
 
-// ── Fetch admins → id→name map ─────────────────────────────────────────────
-async function fetchAdminMap(token: string): Promise<{ map: Map<string, string>; admins: any[] }> {
-  try {
-    const res  = await fetch(`${INTERCOM_API}/admins`, {
+import { unstable_cache } from "next/cache";
+
+// ── Cached admin fetch (1 hour TTL — admins rarely change) ─────────────────
+const getCachedAdmins = unstable_cache(
+  async (): Promise<{ nameMap: Record<string, string>; admins: any[] }> => {
+    const token = process.env.INTERCOM_ACCESS_TOKEN!;
+    const res   = await fetch(`${INTERCOM_API}/admins`, {
       headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
     });
-    const data = await res.json();
-    const list = data.admins ?? [];
-    const map  = new Map<string, string>();
-    list.forEach((a: any) => map.set(String(a.id), a.name ?? a.email ?? `Admin ${a.id}`));
-    return { map, admins: list };
-  } catch {
-    return { map: new Map(), admins: [] };
-  }
-}
+    const data  = await res.json();
+    const list  = data.admins ?? [];
+    const nameMap: Record<string, string> = {};
+    list.forEach((a: any) => { nameMap[String(a.id)] = a.name ?? a.email ?? `Admin ${a.id}`; });
+    return { nameMap, admins: list };
+  },
+  ["intercom-admins"],
+  { revalidate: 3600 }
+);
+
+// ── Cached ticket fetch (5 min TTL) ────────────────────────────────────────
+const getCachedTickets = unstable_cache(
+  async (inboxId: string, agentIdsJson: string, cAfter: number, cBefore: number): Promise<any[]> => {
+    const token    = process.env.INTERCOM_ACCESS_TOKEN!;
+    const agentIds = JSON.parse(agentIdsJson) as number[];
+
+    const orClauses: any[] = [
+      { field: "team_assignee_id", operator: "=", value: parseInt(inboxId) },
+      ...agentIds.map(id => ({ field: "admin_assignee_id", operator: "=", value: id })),
+    ];
+    const query = {
+      operator: "AND",
+      value: [
+        orClauses.length > 1 ? { operator: "OR", value: orClauses } : orClauses[0],
+        { field: "created_at", operator: ">", value: cAfter  },
+        { field: "created_at", operator: "<", value: cBefore },
+      ],
+    };
+    const all: any[] = [];
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    for (let p = 0; p < 15; p++) {
+      const body: any = { query, pagination: { per_page: 150 } };
+      if (cursor) body.pagination.starting_after = cursor;
+      const res  = await fetch(`${INTERCOM_API}/tickets/search`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+          "Intercom-Version": "2.11",
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const t = await res.text(); throw new Error(`Intercom ${res.status}: ${t}`); }
+      const data  = await res.json();
+      const items = data.tickets ?? data.data ?? [];
+      for (const t of items) { if (!seen.has(t.id)) { seen.add(t.id); all.push(t); } }
+      cursor = data.pages?.next?.starting_after ?? null;
+      if (!cursor) break;
+    }
+    return all;
+  },
+  ["intercom-tickets"],
+  { revalidate: 300 }
+);
+
+// ── Legacy direct fetch (kept for internal use) ─────────────────────────────
+async function fetchAdminMap(token: string): Promise<{ map: Map<string, string>; admins: any[] }> {
 
 // ── Fetch tickets (combined: team OR known agents) ─────────────────────────
 async function fetchTickets(
