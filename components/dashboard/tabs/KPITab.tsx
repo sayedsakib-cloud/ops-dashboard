@@ -275,7 +275,8 @@ function BAUSection() {
 
 // ── Main KPI Tab ───────────────────────────────────────────────────────────
 export default function KPITab() {
-  const [section, setSection]   = useState<"kpi" | "bau">("kpi");
+  const [section,       setSection]       = useState<"kpi" | "bau">("kpi");
+  const [bauEverMounted, setBauEverMounted] = useState(false);
 
   // KPI state
   const [data, setData]         = useState<KPIData | null>(null);
@@ -333,7 +334,10 @@ export default function KPITab() {
         ] as const).map(({ key, label }) => (
           <button
             key={key}
-            onClick={() => setSection(key)}
+            onClick={() => {
+              setSection(key);
+              if (key === "bau") setBauEverMounted(true);
+            }}
             className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${
               section === key
                 ? "bg-indigo-600 text-white shadow-sm"
@@ -346,10 +350,12 @@ export default function KPITab() {
       </div>
 
       {/* ── CR BAU ── */}
-      {section === "bau" && <BAUSection />}
+      <div style={{ display: section === "bau" ? "block" : "none" }}>
+        {bauEverMounted && <BAUSection />}
+      </div>
 
       {/* ── KPI content ── */}
-      {section === "kpi" && (
+      <div style={{ display: section === "kpi" ? "block" : "none" }}>
         <div className="space-y-8">
 
           {/* Loading / Error */}
@@ -407,6 +413,7 @@ export default function KPITab() {
                       <span className="font-medium text-gray-600">{data.filterEnd}</span>
                     </p>
                   )}
+                </div>
                 </div>
 
                 {/* Summary cards */}
