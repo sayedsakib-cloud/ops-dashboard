@@ -2,6 +2,22 @@
 import { useEffect, useState } from "react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
 
+// ── Session cache (5-min TTL, survives tab switches) ──────────────────────
+const CACHE_TTL = 5 * 60 * 1000;
+
+function getCached(key: string): any {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) { sessionStorage.removeItem(key); return null; }
+    return data;
+  } catch { return null; }
+}
+function setCache(key: string, data: any): void {
+  try { sessionStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch {}
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentStat = {
   name: string; resolved: number; avgResolutionFmt: string;
@@ -89,6 +105,17 @@ export default function TicketsTab() {
 
   async function load(sec: string, st: SectionState) {
     const setter = sec === "cr" ? setCrState : setBoState;
+
+    // Build deterministic cache key from all filter params
+    const cacheKey = `tickets:${sec}:${st.dateMode}:${st.dateFrom}:${st.dateTo}:${st.ticketType}`;
+
+    // Serve from cache if fresh (avoids re-fetching on tab switch)
+    const hit = getCached(cacheKey);
+    if (hit) {
+      setter(prev => ({ ...prev, data: hit, loading: false, error: null }));
+      return;
+    }
+
     setter(prev => ({ ...prev, loading: true, error: null }));
     try {
       const p = new URLSearchParams({ section: sec });
@@ -103,6 +130,7 @@ export default function TicketsTab() {
       const res  = await fetch(`/api/tickets?${p}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "Failed");
+      setCache(cacheKey, json);
       setter(prev => ({ ...prev, data: json, loading: false }));
     } catch (e) {
       setter(prev => ({ ...prev, error: e instanceof Error ? e.message : "Error", loading: false }));
