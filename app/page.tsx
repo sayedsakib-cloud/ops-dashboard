@@ -16,24 +16,24 @@ const TABS = [
 
 export default function DashboardPage() {
   const [active,  setActive]  = useState("daily-huddle");
-  // Record-based: tabs are never removed once mounted
+  // Record<id, mounted> — once true, never removed, component stays in DOM
   const [mounted, setMounted] = useState<Record<string, boolean>>({
     "daily-huddle": true,
   });
 
   function switchTab(id: string) {
     setActive(id);
-    // Only update state if not already mounted (avoids unnecessary re-render)
     if (!mounted[id]) setMounted(prev => ({ ...prev, [id]: true }));
   }
 
-  // Inline style — cannot be overridden by any CSS class
-  const vis = (id: string): React.CSSProperties =>
-    ({ display: active === id ? "block" : "none" });
+  // Inline style toggle — cannot be overridden by any CSS class
+  const vis = (id: string): React.CSSProperties => ({
+    display: active === id ? "block" : "none",
+  });
 
   return (
     <div className="min-h-screen bg-gray-100">
-      {/* Tab bar */}
+      {/* Tab navigation */}
       <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
         <div className="max-w-screen-2xl mx-auto px-6">
           <nav className="flex overflow-x-auto">
@@ -54,7 +54,7 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Content — mount once, persist via inline style toggle */}
+      {/* Tab content — each tab mounts once on first visit, then persists via display style */}
       <div className="max-w-screen-2xl mx-auto px-6 py-6">
         <div style={vis("daily-huddle")}>
           {mounted["daily-huddle"] && <DailyHuddleTab />}
