@@ -8,10 +8,10 @@ const SLA_SECS     = 24 * 3600;
 
 // Base agent list — new agents in CR teams are auto-discovered
 const TEEP_AGENT_NAMES = [
-  "John Ferguson", "Camellia Warren", "Anna Linhart",
-  "Nina Sterling", "Eliana Zahra", "Natalie Carter",
-  "Liam Wilson",   "Joshua O'Brian", "Allison Peiris",
-  "Grace Morgan",  "Rosie Dunn", "Samael",
+  "john ferguson", "camellia warren", "anna linhart",
+  "nina sterling", "eliana zahra", "natalie carter",
+  "liam wilson",   "joshua o'brian", "allison peiris",
+  "grace morgan",  "rosie dunn", "samael",
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
