@@ -31,6 +31,14 @@ function fmt(secs: number): string {
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
 
+/** Normalize names for comparison — lowercase + decode HTML apostrophe */
+function normName(s: string): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/&#39;/g, "'")   // Intercom HTML-encodes apostrophes
+    .replace(/\u2019/g, "'"); // curly apostrophe
+}
+
 // ── Cached: CR teams (1-hour TTL) ─────────────────────────────────────────
 const getCRTeams = unstable_cache(
   async (): Promise<{ id: string; name: string }[]> => {
@@ -176,7 +184,8 @@ export async function GET(req: Request) {
     // Pre-populate all base TEEP agents (even if 0 conversations this period)
     admins
       .filter((a: any) => TEEP_AGENT_NAMES.some(n =>
-        (a.name ?? "").toLowerCase().includes(n) || n.includes((a.name ?? "").toLowerCase())
+        normName(a.name).includes(normName(n)) ||
+        normName(n).includes(normName(a.name))
       ))
       .forEach((a: any) => {
         const id = String(a.id);
