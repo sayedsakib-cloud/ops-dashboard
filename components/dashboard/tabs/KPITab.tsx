@@ -406,12 +406,12 @@ export default function KPITab() {
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">📅 Date Range Filter</p>
                 <div className="flex flex-wrap items-end gap-4">
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">From (week start ≥ Saturday)</label>
+                    <label className="block text-xs text-gray-500 mb-1">From (week start)</label>
                     <input type="date" value={fromDate} onChange={e => setFrom(e.target.value)}
                       className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
                   <div>
-                    <label className="block text-xs text-gray-500 mb-1">To (week end ≤ Friday)</label>
+                    <label className="block text-xs text-gray-500 mb-1">To (week end)</label>
                     <input type="date" value={toDate} onChange={e => setTo(e.target.value)}
                       className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
                   </div>
@@ -435,7 +435,7 @@ export default function KPITab() {
                 {data.filterStart && data.filterEnd && (
                   <p className="text-xs text-gray-400 mt-3">
                     Showing: <span className="font-medium text-gray-600">{data.filterStart}</span>
-                    {" → "}
+                    {" to "}
                     <span className="font-medium text-gray-600">{data.filterEnd}</span>
                   </p>
                 )}
@@ -458,7 +458,7 @@ export default function KPITab() {
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">Individual Weekly Performance</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Metrics by agent · CR Pax KPI DB</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Metrics by agent - CR Pax KPI DB</p>
                   </div>
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
                     {data.individualPerformance.length} agents
@@ -501,7 +501,7 @@ export default function KPITab() {
                 <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">Team KPI DB Summary</p>
-                    <p className="text-xs text-gray-400 mt-0.5">High-level operations monitoring · CR Team KPI DB</p>
+                    <p className="text-xs text-gray-400 mt-0.5">High-level operations monitoring - CR Team KPI DB</p>
                   </div>
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
                     {data.teamKPI.length} records
@@ -515,7 +515,7 @@ export default function KPITab() {
                         <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No data for selected period</td></tr>
                       ) : data.teamKPI.map((row, i) => (
                         <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                          <td className="px-4 py-3 font-medium text-gray-800">{row.weekStart} → {row.weekEnd}</td>
+                          <td className="px-4 py-3 font-medium text-gray-800">{row.weekStart}{" to "}{row.weekEnd}</td>
                           <td className="px-4 py-3 text-gray-600 font-medium">{row.quarter}</td>
                           <td className="px-4 py-3">
                             <span className={`font-semibold ${parseFloat(row.negReviewPct) >= 3 ? "text-red-600" : "text-amber-600"}`}>
@@ -575,7 +575,7 @@ export default function KPITab() {
                 <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
                   <div>
                     <p className="font-semibold text-gray-900 text-sm">Agent Points — {quarter}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Average performance scores · {quarter}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">Average performance scores - {quarter}</p>
                   </div>
                   <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
                     {qtrAgents.length} agents
