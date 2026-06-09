@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-// ── Types ──────────────────────────────────────────────────────────────────
+// -- Types ------------------------------------------------------------------
 type Fmt    = "number" | "hrs" | "currency";
 type Metric = { label: string; value: number|null; change: number|null; format: Fmt };
 type HuddleData = {
@@ -17,11 +17,13 @@ type HuddleData = {
   crSavings:      Metric;
 };
 
-// ── Formatters ─────────────────────────────────────────────────────────────
+// -- Formatters -------------------------------------------------------------
 function fmtVal(m: Metric): string {
-  if (m.value === null) return "—";
+  if (m.value === null) return "--";
   if (m.format === "currency")
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2 }).format(m.value);
+    return new Intl.NumberFormat("en-US", {
+      style: "currency", currency: "USD", minimumFractionDigits: 2,
+    }).format(m.value);
   if (m.format === "hrs") return `${m.value} hrs`;
   return new Intl.NumberFormat("en-US").format(m.value);
 }
@@ -31,7 +33,7 @@ function fmtDate(iso: string) {
   });
 }
 
-// ── Sub-components ─────────────────────────────────────────────────────────
+// -- Sub-components ---------------------------------------------------------
 function MetricCard({ m }: { m: Metric }) {
   const up = (m.change ?? 0) >= 0;
   return (
@@ -41,13 +43,14 @@ function MetricCard({ m }: { m: Metric }) {
         <div className="text-2xl font-bold text-gray-900">{fmtVal(m)}</div>
         {m.change !== null && (
           <div className={`text-xs mt-0.5 font-semibold ${up ? "text-green-600" : "text-red-500"}`}>
-            {up ? "▲" : "▼"} {Math.abs(m.change).toFixed(1)}%
+            {up ? "+" : ""}{m.change.toFixed(1)}%
           </div>
         )}
       </div>
     </div>
   );
 }
+
 function SectionHeader({ title }: { title: string }) {
   return (
     <div className="bg-indigo-950 text-white text-center font-semibold py-2.5 text-sm tracking-wide rounded-t-lg">
@@ -56,7 +59,7 @@ function SectionHeader({ title }: { title: string }) {
   );
 }
 
-// ── Main Component ─────────────────────────────────────────────────────────
+// -- Main Component ---------------------------------------------------------
 export default function DailyHuddleTab() {
   const [data,       setData]    = useState<HuddleData | null>(null);
   const [loading,    setLoading] = useState(true);
@@ -65,12 +68,13 @@ export default function DailyHuddleTab() {
   const [rangeEnd,   setEnd]     = useState("");
 
   async function load(start?: string, end?: string) {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
       const p = new URLSearchParams();
       if (start) p.set("startDate", start);
       if (end)   p.set("endDate",   end);
-      const url  = "/api/dailyhuddle" + (p.toString() ? `?${p}` : "");
+      const url  = "/api/dailyhuddle" + (p.toString() ? "?" + p.toString() : "");
       const res  = await fetch(url);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load");
@@ -86,32 +90,39 @@ export default function DailyHuddleTab() {
 
   useEffect(() => { load(); }, []);
 
-  if (loading)
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="text-gray-400 text-sm animate-pulse">Loading Daily Huddle data…</div>
+        <div className="text-gray-400 text-sm animate-pulse">Loading Daily Huddle data...</div>
       </div>
     );
-  if (error)
+  }
+
+  if (error) {
     return (
       <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
         Error: {error}
       </div>
     );
+  }
+
   if (!data) return null;
 
-  const minDate = data.availableDates[0];
-  const maxDate = data.availableDates[data.availableDates.length - 1];
+  const minDate    = data.availableDates[0];
+  const maxDate    = data.availableDates[data.availableDates.length - 1];
+  const isRange    = data.rangeDays > 1;
+  const rangeLabel = isRange
+    ? data.rangeDays + "-day range vs prior " + data.rangeDays + " days"
+    : (data.prevDate ? "vs " + fmtDate(data.prevDate) : "");
 
   return (
     <div className="space-y-5">
 
       {/* Header + Date range picker */}
       <div className="bg-white rounded-lg shadow-sm px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-xl font-bold text-gray-900">Daily Huddle — Operations</h1>
+        <h1 className="text-xl font-bold text-gray-900">Daily Huddle - Operations</h1>
 
         <div className="flex flex-wrap items-end gap-3">
-          {/* From date */}
           <div>
             <label className="block text-xs text-gray-500 font-medium mb-1">From</label>
             <input
@@ -124,7 +135,6 @@ export default function DailyHuddleTab() {
             />
           </div>
 
-          {/* To date */}
           <div>
             <label className="block text-xs text-gray-500 font-medium mb-1">To</label>
             <input
@@ -137,7 +147,6 @@ export default function DailyHuddleTab() {
             />
           </div>
 
-          {/* Apply button */}
           <button
             onClick={() => load(rangeStart, rangeEnd)}
             className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
@@ -145,7 +154,6 @@ export default function DailyHuddleTab() {
             Apply
           </button>
 
-          {/* Reset to latest day */}
           <button
             onClick={() => { setStart(""); setEnd(""); load(); }}
             className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 transition-colors"
@@ -153,12 +161,9 @@ export default function DailyHuddleTab() {
             Reset
           </button>
 
-          {/* Range label */}
-          {data.prevDate && (
+          {rangeLabel && (
             <span className="text-xs text-gray-400 hidden md:inline self-end pb-2">
-              {data.rangeDays > 1
-                ? `${data.rangeDays}-day range · vs prior ${data.rangeDays} days`
-                : `vs ${fmtDate(data.prevDate)}`}
+              {rangeLabel}
             </span>
           )}
         </div>
@@ -168,18 +173,16 @@ export default function DailyHuddleTab() {
       <div className="rounded-lg overflow-hidden shadow-sm">
         <SectionHeader title="BizOps Last Day Metrics" />
         <div className="bg-gray-50 p-4 space-y-3">
-          {/* Row 1 — 6 metric cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {data.bizops.map(m => <MetricCard key={m.label} m={m} />)}
           </div>
 
-          {/* Row 2 — FN Processed + label + Eligible KYC + Eligible Payout */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
             <MetricCard m={data.bizopsEligible.fnProcessed} />
             <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
-              <span className="text-sm font-bold text-gray-700 leading-tight">Today&apos;s</span>
+              <span className="text-sm font-bold text-gray-700 leading-tight">{"Today's"}</span>
               <span className="text-sm font-bold text-gray-700 leading-tight">Eligible Count</span>
-              <span className="text-2xl text-indigo-600 font-bold mt-1">→</span>
+              <span className="text-2xl text-indigo-600 font-bold mt-1">{"->"}</span>
             </div>
             <MetricCard m={data.bizopsEligible.eligibleKYC} />
             <MetricCard m={data.bizopsEligible.eligiblePayout} />
@@ -191,20 +194,16 @@ export default function DailyHuddleTab() {
       <div className="rounded-lg overflow-hidden shadow-sm">
         <SectionHeader title="CR Last Day Metrics" />
         <div className="bg-gray-50 p-4 space-y-3">
-          {/* Row 1 — 6 metric cards */}
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {data.cr.map(m => <MetricCard key={m.label} m={m} />)}
           </div>
 
-          {/* Savings Amount — full-width */}
           <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 text-center">
             <div className="text-sm text-gray-500 font-medium mb-1">{data.crSavings.label}</div>
             <div className="text-4xl font-bold text-gray-900">{fmtVal(data.crSavings)}</div>
             {data.crSavings.change !== null && (
-              <div className={`text-sm mt-1.5 font-semibold ${
-                (data.crSavings.change ?? 0) >= 0 ? "text-green-600" : "text-red-500"
-              }`}>
-                {(data.crSavings.change ?? 0) >= 0 ? "▲" : "▼"} {Math.abs(data.crSavings.change).toFixed(1)}%
+              <div className={`text-sm mt-1.5 font-semibold ${(data.crSavings.change ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>
+                {(data.crSavings.change ?? 0) >= 0 ? "+" : ""}{Math.abs(data.crSavings.change).toFixed(1)}%
               </div>
             )}
           </div>
@@ -212,9 +211,10 @@ export default function DailyHuddleTab() {
       </div>
 
       <p className="text-xs text-gray-400 text-right">
-        Showing {fmtDate(data.rangeStart)}
-        {data.rangeStart !== data.rangeEnd && ` – ${fmtDate(data.rangeEnd)}`}
-        {data.prevDate && ` · compared to prior ${data.rangeDays} day${data.rangeDays > 1 ? "s" : ""}`}
+        {isRange
+          ? "Showing " + fmtDate(data.rangeStart) + " to " + fmtDate(data.rangeEnd)
+          : "Showing " + fmtDate(data.rangeEnd)}
+        {data.prevDate && " (vs prior period)"}
       </p>
     </div>
   );
