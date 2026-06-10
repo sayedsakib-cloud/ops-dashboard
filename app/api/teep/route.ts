@@ -99,8 +99,8 @@ async function fetchConversations(
     value: [
       { field: "source.type", operator: "=", value: "email" },
       adminClauses.length > 1 ? { operator: "OR", value: adminClauses } : adminClauses[0],
-      { field: "created_at", operator: ">", value: cAfter  },
-      { field: "created_at", operator: "<", value: cBefore },
+      { field: "updated_at", operator: ">", value: cAfter  },
+      { field: "updated_at", operator: "<", value: cBefore },
     ],
   };
 
