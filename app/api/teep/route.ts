@@ -71,14 +71,13 @@ const getAdmins = unstable_cache(
   { revalidate: 3600 }
 );
 
-// ── Fetch all pages for ONE admin (parallel pagination) ────────────────────
-// Cursor-based sequential pagination per agent.
-// Page-number offset (pagination.page) is silently ignored by Intercom search —
-// every call without a cursor returns page 1, capping results at 150.
-// Each of the 12 agents runs this loop in parallel with the others.
-async function fetchConvsForAdmin(
+// ── Fetch all conversations for ONE team (cursor pagination) ───────────────
+// Key insight: search results return `admin_assignee_id` as a flat top-level
+// integer field (confirmed via debug). The nested `assignee` object is NOT
+// returned — reading c.assignee?.id was always null. c.admin_assignee_id works.
+async function fetchConvsForTeam(
   token:   string,
-  adminId: string,
+  teamId:  string,
   uAfter:  number,
   uBefore: number,
 ): Promise<any[]> {
@@ -91,10 +90,10 @@ async function fetchConvsForAdmin(
   const query = {
     operator: "AND",
     value: [
-      { field: "source.type",        operator: "=", value: "email"            },
-      { field: "admin_assignee_id",   operator: "=", value: parseInt(adminId)  },
-      { field: "updated_at",         operator: ">", value: uAfter             },
-      { field: "updated_at",         operator: "<", value: uBefore            },
+      { field: "source.type",       operator: "=", value: "email"          },
+      { field: "team_assignee_id",   operator: "=", value: parseInt(teamId) },
+      { field: "updated_at",        operator: ">", value: uAfter           },
+      { field: "updated_at",        operator: "<", value: uBefore          },
     ],
   };
 
@@ -102,7 +101,7 @@ async function fetchConvsForAdmin(
   const seen        = new Set<string>();
   let   cursor: string | null = null;
 
-  for (let p = 0; p < 20; p++) {          // safety cap: 20 pages × 150 = 3,000 per agent
+  for (let p = 0; p < 20; p++) {
     const pagination: any = { per_page: 150 };
     if (cursor) pagination.starting_after = cursor;
 
@@ -151,16 +150,34 @@ export async function GET(req: Request) {
     if (!crTeams.length)
       return NextResponse.json({ error: "No CR teams found" }, { status: 404 });
 
-    // Match TEEP agents from the workspace admin list
+    // Match TEEP agents
     const teepAdmins = admins.filter((a: any) =>
       TEEP_AGENT_NAMES.some(n =>
         normName(a.name).includes(normName(n)) ||
         normName(n).includes(normName(a.name))
       )
     );
+    const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
 
     if (!teepAdmins.length)
       return NextResponse.json({ error: "No TEEP agents matched" }, { status: 404 });
+
+    // ── Fetch all CR teams IN PARALLEL, cursor-paginate each ─────────────
+    // This replaces 12 per-admin searches with 15 per-team searches.
+    // admin_assignee_id is a top-level field in search results — no need to
+    // fetch individual conversations to know who handled each one.
+    const teamResults = await Promise.all(
+      crTeams.map(t => fetchConvsForTeam(token, t.id, uAfter, uBefore))
+    );
+
+    // Merge all teams + deduplicate (a conv can appear in 2 teams if reassigned)
+    const allConvs: any[] = [];
+    const globalSeen      = new Set<string>();
+    for (const teamConvs of teamResults) {
+      for (const c of teamConvs) {
+        if (!globalSeen.has(c.id)) { globalSeen.add(c.id); allConvs.push(c); }
+      }
+    }
 
     // ── Per-agent accumulator ─────────────────────────────────────────────
     type Acc = {
@@ -181,65 +198,58 @@ export async function GET(req: Request) {
     }
 
     const agentMap = new Map<string, Acc>();
-
-    // Pre-populate all matched TEEP agents
     teepAdmins.forEach((a: any) => {
-      const id = String(a.id);
-      if (!agentMap.has(id)) agentMap.set(id, emptyAcc(decodeName(a.name ?? id)));
+      agentMap.set(String(a.id), emptyAcc(decodeName(a.name ?? String(a.id))));
     });
 
-    // ── Fetch conversations per agent IN PARALLEL ─────────────────────────
-    // Each search is scoped to ONE admin — so we know exactly who each conv belongs to.
-    // This avoids relying on c.assignee which is NOT returned by the search API.
-    const agentResults = await Promise.all(
-      teepAdmins.map(async (a: any) => ({
-        adminId: String(a.id),
-        convs:   await fetchConvsForAdmin(token, String(a.id), uAfter, uBefore),
-      }))
-    );
+    // ── Process every conversation ────────────────────────────────────────
+    for (const c of allConvs) {
+      // Use admin_assignee_id — the flat top-level integer field that IS
+      // returned in search results (confirmed in debug output)
+      const adminId = c.admin_assignee_id ? String(c.admin_assignee_id) : null;
+      if (!adminId || !teepAdminIdSet.has(adminId)) continue;
 
-    // ── Process each agent's conversations ────────────────────────────────
-    for (const { adminId, convs } of agentResults) {
-      const acc = agentMap.get(adminId);
-      if (!acc) continue;
+      const acc    = agentMap.get(adminId)!;
+      const stats  = c.statistics ?? {};
 
-      for (const c of convs) {
-        const stats      = c.statistics ?? {};
-        const adminReply = stats.time_to_admin_reply      ?? 0;
-        const handling   = stats.time_to_first_close      ?? 0;
-        const assignment = stats.time_to_assignment       ?? 0;
-        const parts      = stats.count_conversation_parts ?? 0;
+      const adminReply  = stats.time_to_admin_reply   ?? 0;
+      const handling    = stats.time_to_first_close   ?? 0;
+      const assignment  = stats.time_to_assignment    ?? 0;
+      const parts       = stats.count_conversation_parts ?? 0;
+      const lastCloseAt = stats.last_close_at         ?? 0;
 
-        acc.assigned++;
+      acc.assigned++;
 
-        if (adminReply > 0) {
-          acc.repliedTo++;
-          acc.repliesSent += Math.max(1, Math.floor(parts / 2));
-          acc.slaTotal++;
-          if (adminReply <= SLA_SECS) acc.slaMet++;
+      if (adminReply > 0) {
+        acc.repliedTo++;
+        acc.repliesSent += Math.max(1, Math.floor(parts / 2));
+        acc.slaTotal++;
+        if (adminReply <= SLA_SECS) acc.slaMet++;
 
-          // FRT = time_to_admin_reply: time from creation to first HUMAN reply
-          // (first_response_time = FIN AI bot reply, near-instant, useless here)
-          acc.frtSum += adminReply;
-          acc.frtN++;
+        // FRT = time_to_admin_reply (first HUMAN reply, excl. FIN AI bot)
+        acc.frtSum += adminReply;
+        acc.frtN++;
 
-          // ATF = human reply time minus team-assignment time (best available proxy)
-          const atf = adminReply - Math.max(0, assignment);
-          if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
-        }
+        // ATF = time from first assignment to first human reply
+        const atf = adminReply - Math.max(0, assignment);
+        if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
+      }
 
-        if (c.state === "closed" || c.state === "resolved") acc.closed++;
+      // Closed count: use last_close_at for accuracy — counts conversations
+      // actually closed during this period even if later reopened.
+      // Falls back to c.state for conversations without close timestamp.
+      const closedInPeriod = lastCloseAt > 0
+        ? (lastCloseAt >= uAfter && lastCloseAt <= uBefore)
+        : (c.state === "closed" || c.state === "resolved");
+      if (closedInPeriod) acc.closed++;
 
-        // Handling = first human reply → close  (removes queue-wait before agent picked up)
-        // Matches Intercom's "Teammate handling time" more closely than time_to_first_close alone
-        if (handling > 0 && adminReply > 0 && handling > adminReply) {
-          acc.handlingSum += handling - adminReply;
-          acc.handlingN++;
-        } else if (handling > 0 && adminReply === 0) {
-          // No reply recorded — fall back to full close time
-          acc.handlingSum += handling;
-          acc.handlingN++;
-        }
+      // Handling = first human reply → close (active working time)
+      if (handling > 0 && adminReply > 0 && handling > adminReply) {
+        acc.handlingSum += handling - adminReply;
+        acc.handlingN++;
+      } else if (handling > 0 && adminReply === 0) {
+        acc.handlingSum += handling;
+        acc.handlingN++;
       }
     }
 
@@ -262,11 +272,11 @@ export async function GET(req: Request) {
         repliedTo:      a.repliedTo,
         repliesSent:    a.repliesSent,
         closed:         a.closed,
-        avgFrtFmt:      a.frtN > 0       ? fmt(a.frtSum / a.frtN)           : "--",
-        avgHandlingFmt: a.handlingN > 0   ? fmt(a.handlingSum / a.handlingN) : "--",
-        avgAtfFmt:      a.atfN > 0        ? fmt(a.atfSum / a.atfN)           : "--",
-        repliedPerHour: activeHours > 0   ? (a.repliedTo / activeHours).toFixed(1) : "--",
-        closedPerHour:  activeHours > 0   ? (a.closed    / activeHours).toFixed(1) : "--",
+        avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
+        avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
+        avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
+        repliedPerHour: activeHours > 0  ? (a.repliedTo / activeHours).toFixed(1) : "--",
+        closedPerHour:  activeHours > 0  ? (a.closed    / activeHours).toFixed(1) : "--",
         slaMet:         a.slaMet,
         slaTotal:       a.slaTotal,
         slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
@@ -296,7 +306,7 @@ export async function GET(req: Request) {
       closed:         totalClosed,
       avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
-      avgAtfFmt:      wAtfN > 0 ? fmt(wAtfSum / wAtfN) : "--",
+      avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
       repliedPerHour: activeHours > 0 ? (totalRepliedTo / activeHours).toFixed(1) : "--",
       closedPerHour:  activeHours > 0 ? (totalClosed    / activeHours).toFixed(1) : "--",
       slaMet:         totalSlaMet,
