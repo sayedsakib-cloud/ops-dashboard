@@ -307,7 +307,6 @@ export async function GET(req: Request) {
     const top3 = rows.slice(0, 3).map(r => ({ name: r.name, closed: r.closed }));
 
     return NextResponse.json({
-      return NextResponse.json({
       summary: {
         totalClosed,
         avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
