@@ -148,6 +148,72 @@ export async function GET(req: Request) {
       } : "No CR teams found",
 
       // STEP 5: Any conversations (no filters)
+      // STEP 5: Conversations updated (not created) in last 7 days — email, first CR team
+      conv_updated_in_period: await (async () => {
+        const b = {
+          query: {
+            operator: "AND",
+            value: [
+              { field: "source.type", operator: "=", value: "email"       },
+              { field: "team_assignee_id", operator: "=", value: 6813596  },
+              { field: "updated_at",  operator: ">", value: d7            },
+            ],
+          },
+          pagination: { per_page: 3 },
+        };
+        const r = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Intercom-Version": "2.11" },
+          body: JSON.stringify(b),
+        });
+        const d = await r.json();
+        return {
+          total: d.total_count ?? 0,
+          sample: (d.conversations ?? []).slice(0, 3).map((c: any) => ({
+            id:              c.id,
+            state:           c.state,
+            created_at:      c.created_at,
+            updated_at:      c.updated_at,
+            assignee_type:   c.assignee?.type,
+            assignee_id:     c.assignee?.id,
+            assignee_name:   c.assignee?.name,
+          })),
+        };
+      })(),
+
+      // STEP 6: Search by admin_assignee_id for Samael, no date filter
+      conv_samael_no_date: await (async () => {
+        const b = {
+          query: {
+            operator: "AND",
+            value: [
+              { field: "source.type",       operator: "=", value: "email"   },
+              { field: "admin_assignee_id",  operator: "=", value: 6609254  },
+            ],
+          },
+          pagination: { per_page: 3 },
+        };
+        const r = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Intercom-Version": "2.11" },
+          body: JSON.stringify(b),
+        });
+        const d = await r.json();
+        return {
+          total: d.total_count ?? 0,
+          errors: d.errors ?? null,
+          sample: (d.conversations ?? []).slice(0, 3).map((c: any) => ({
+            id:            c.id,
+            state:         c.state,
+            created_at:    c.created_at,
+            updated_at:    c.updated_at,
+            assignee_type: c.assignee?.type,
+            assignee_id:   c.assignee?.id,
+          })),
+        };
+      })(),
+
+      // STEP 7: Any conversations (no filters)
       conv_any_last_7_days: {
         total: anyConv.total_count ?? 0,
         sample: (anyConv.conversations ?? []).slice(0, 3).map((c: any) => ({
