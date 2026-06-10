@@ -236,16 +236,19 @@ export async function GET(req: Request) {
         return {
           total: d.total_count ?? 0,
           sample: (d.conversations ?? []).slice(0, 5).map((c: any) => ({
-            id:               c.id,
-            state:            c.state,
-            assignee_type:    c.assignee?.type,
-            assignee_id:      c.assignee?.id,
-            assignee_name:    c.assignee?.name,
-            team_assignee_id: c.team_assignee_id,
-            updated_at:       c.updated_at,
-            stats_last_close: c.statistics?.last_close_at,
-            stats_frt:        c.statistics?.first_response_time,
-            stats_admin_reply: c.statistics?.time_to_admin_reply,
+            id:                  c.id,
+            state:               c.state,
+            // top-level separate fields (like team_assignee_id)
+            admin_assignee_id:   c.admin_assignee_id,    // ← KEY TEST
+            team_assignee_id:    c.team_assignee_id,
+            // nested object (not returned in search results usually)
+            assignee_obj_type:   c.assignee?.type,
+            assignee_obj_id:     c.assignee?.id,
+            // all top-level keys to see everything returned
+            all_keys:            Object.keys(c),
+            updated_at:          c.updated_at,
+            stats_last_close:    c.statistics?.last_close_at,
+            stats_admin_reply:   c.statistics?.time_to_admin_reply,
           })),
         };
       })(),
