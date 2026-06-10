@@ -72,6 +72,10 @@ const getAdmins = unstable_cache(
 );
 
 // ── Fetch all pages for ONE admin (parallel pagination) ────────────────────
+// Cursor-based sequential pagination per agent.
+// Page-number offset (pagination.page) is silently ignored by Intercom search —
+// every call without a cursor returns page 1, capping results at 150.
+// Each of the 12 agents runs this loop in parallel with the others.
 async function fetchConvsForAdmin(
   token:   string,
   adminId: string,
@@ -84,44 +88,38 @@ async function fetchConvsForAdmin(
     "Intercom-Version": "2.11",
   };
 
-  // Key insight: filter by updated_at (when agent WORKED on it), not created_at
-  // Also: search results don't return c.assignee — so we search per-admin
-  // separately so we know which admin each conversation belongs to
   const query = {
     operator: "AND",
     value: [
-      { field: "source.type",       operator: "=", value: "email"          },
-      { field: "admin_assignee_id",  operator: "=", value: parseInt(adminId) },
-      { field: "updated_at",        operator: ">", value: uAfter           },
-      { field: "updated_at",        operator: "<", value: uBefore          },
+      { field: "source.type",        operator: "=", value: "email"            },
+      { field: "admin_assignee_id",   operator: "=", value: parseInt(adminId)  },
+      { field: "updated_at",         operator: ">", value: uAfter             },
+      { field: "updated_at",         operator: "<", value: uBefore            },
     ],
   };
 
-  async function fetchPage(pageNum: number): Promise<any> {
+  const all: any[] = [];
+  const seen        = new Set<string>();
+  let   cursor: string | null = null;
+
+  for (let p = 0; p < 20; p++) {          // safety cap: 20 pages × 150 = 3,000 per agent
     const pagination: any = { per_page: 150 };
-    if (pageNum > 1) pagination.page = pageNum;
+    if (cursor) pagination.starting_after = cursor;
+
     const res = await fetch(`${INTERCOM_API}/conversations/search`, {
       method: "POST", headers: HDRS,
       body: JSON.stringify({ query, pagination }),
       next: { revalidate: 300 },
     });
     if (!res.ok) { const t = await res.text(); throw new Error(`Intercom ${res.status}: ${t}`); }
-    return res.json();
-  }
+    const data = await res.json();
 
-  const page1      = await fetchPage(1);
-  const totalPages = Math.min(page1.pages?.total_pages ?? 1, 10); // cap at 10 pages per agent
-  const restData   = totalPages > 1
-    ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) => fetchPage(i + 2)))
-    : [];
+    for (const c of (data.conversations ?? [])) {
+      if (!seen.has(c.id)) { seen.add(c.id); all.push(c); }
+    }
 
-  const all: any[] = [];
-  const seen = new Set<string>();
-  for (const c of [
-    ...(page1.conversations ?? []),
-    ...restData.flatMap((d: any) => d.conversations ?? []),
-  ]) {
-    if (!seen.has(c.id)) { seen.add(c.id); all.push(c); }
+    cursor = data.pages?.next?.starting_after ?? null;
+    if (!cursor) break;
   }
   return all;
 }
@@ -309,9 +307,11 @@ export async function GET(req: Request) {
     const top3 = rows.slice(0, 3).map(r => ({ name: r.name, closed: r.closed }));
 
     return NextResponse.json({
+      return NextResponse.json({
       summary: {
         totalClosed,
-        avgHandlingFmt:  wHandlingN > 0 ? fmt(wHandlingSum / wHandlingN) : "--",
+        avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
+        avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
         slaRate:         summaryRow.slaRate,
         slaMetCount:     totalSlaMet,
         slaTotalCount:   totalSlaTotal,
