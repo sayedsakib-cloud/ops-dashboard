@@ -1,17 +1,16 @@
-import { NextResponse }    from "next/server";
-import { getServerSession } from "next-auth";
-import { authOptions }      from "@/lib/auth";
-import { unstable_cache }   from "next/cache";
+import { NextResponse }     from "next/server";
+import { getServerSession }  from "next-auth";
+import { authOptions }       from "@/lib/auth";
+import { unstable_cache }    from "next/cache";
 
 const INTERCOM_API = "https://api.intercom.io";
 const SLA_SECS     = 24 * 3600;
 
-// Base agent list — new agents in CR teams are auto-discovered
 const TEEP_AGENT_NAMES = [
   "john ferguson", "camellia warren", "anna linhart",
-  "nina sterling", "eliana zahra", "natalie carter",
-  "liam wilson",   "joshua o'brian", "allison peiris",
-  "grace morgan",  "rosie dunn", "samael",
+  "nina sterling",  "eliana zahra",   "natalie carter",
+  "liam wilson",    "joshua o'brian", "allison peiris",
+  "grace morgan",   "rosie dunn",     "samael",
 ];
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -30,16 +29,9 @@ function fmt(secs: number): string {
   const d = Math.floor(h / 24), rh = h % 24;
   return rh > 0 ? `${d}d ${rh}h` : `${d}d`;
 }
-
-/** Normalize names for comparison — lowercase + decode HTML apostrophe */
 function normName(s: string): string {
-  return (s ?? "")
-    .toLowerCase()
-    .replace(/&#39;/g, "'")   // Intercom HTML-encodes apostrophes
-    .replace(/\u2019/g, "'"); // curly apostrophe
+  return (s ?? "").toLowerCase().replace(/&#39;/g, "'").replace(/\u2019/g, "'");
 }
-
-/** Decode HTML entities in display names (Intercom stores "O&#39;Brian") */
 function decodeName(s: string): string {
   return (s ?? "").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
 }
@@ -79,35 +71,30 @@ const getAdmins = unstable_cache(
   { revalidate: 3600 }
 );
 
-// ── Conversations fetch with parallel pagination ───────────────────────────
-async function fetchConversations(
-  token:         string,
-  teepAdminIds:  string[],
-  cAfter:        number,
-  cBefore:       number,
+// ── Fetch all pages for ONE admin (parallel pagination) ────────────────────
+async function fetchConvsForAdmin(
+  token:   string,
+  adminId: string,
+  uAfter:  number,
+  uBefore: number,
 ): Promise<any[]> {
-  if (!teepAdminIds.length) return [];
-
-  // Search by individual admin IDs — team-queue conversations have null assignee
-  // so searching by team would return 0 agent-attributed conversations
-  const adminClauses = teepAdminIds.map(id => ({
-    field: "admin_assignee_id", operator: "=", value: parseInt(id),
-  }));
-
-  const query = {
-    operator: "AND",
-    value: [
-      { field: "source.type", operator: "=", value: "email" },
-      adminClauses.length > 1 ? { operator: "OR", value: adminClauses } : adminClauses[0],
-      { field: "updated_at", operator: ">", value: cAfter  },
-      { field: "updated_at", operator: "<", value: cBefore },
-    ],
-  };
-
   const HDRS = {
     Authorization:      `Bearer ${token}`,
     "Content-Type":     "application/json",
     "Intercom-Version": "2.11",
+  };
+
+  // Key insight: filter by updated_at (when agent WORKED on it), not created_at
+  // Also: search results don't return c.assignee — so we search per-admin
+  // separately so we know which admin each conversation belongs to
+  const query = {
+    operator: "AND",
+    value: [
+      { field: "source.type",       operator: "=", value: "email"          },
+      { field: "admin_assignee_id",  operator: "=", value: parseInt(adminId) },
+      { field: "updated_at",        operator: ">", value: uAfter           },
+      { field: "updated_at",        operator: "<", value: uBefore          },
+    ],
   };
 
   async function fetchPage(pageNum: number): Promise<any> {
@@ -123,7 +110,7 @@ async function fetchConversations(
   }
 
   const page1      = await fetchPage(1);
-  const totalPages = Math.min(page1.pages?.total_pages ?? 1, 15);
+  const totalPages = Math.min(page1.pages?.total_pages ?? 1, 10); // cap at 10 pages per agent
   const restData   = totalPages > 1
     ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) => fetchPage(i + 2)))
     : [];
@@ -154,9 +141,9 @@ export async function GET(req: Request) {
 
     const now     = Math.floor(Date.now() / 1000);
     const d7      = now - 7 * 86400;
-    const cAfter  = startDate ? toUnixStart(startDate) : d7;
-    const cBefore = endDate   ? toUnixEnd(endDate)     : now;
-    const periodDays = Math.max(1, Math.round((cBefore - cAfter) / 86400));
+    const uAfter  = startDate ? toUnixStart(startDate) : d7;
+    const uBefore = endDate   ? toUnixEnd(endDate)     : now;
+    const periodDays = Math.max(1, Math.round((uBefore - uAfter) / 86400));
 
     const [crTeams, { nameMap, admins }] = await Promise.all([
       getCRTeams(),
@@ -164,31 +151,27 @@ export async function GET(req: Request) {
     ]);
 
     if (!crTeams.length)
-      return NextResponse.json({ error: "No CR teams found in workspace" }, { status: 404 });
+      return NextResponse.json({ error: "No CR teams found" }, { status: 404 });
 
-    // Resolve TEEP admin IDs before fetching conversations
+    // Match TEEP agents from the workspace admin list
     const teepAdmins = admins.filter((a: any) =>
       TEEP_AGENT_NAMES.some(n =>
         normName(a.name).includes(normName(n)) ||
         normName(n).includes(normName(a.name))
       )
     );
-    const teepAdminIds = teepAdmins.map((a: any) => String(a.id));
 
-    if (!teepAdminIds.length)
-      return NextResponse.json({ error: "No TEEP agents matched in workspace" }, { status: 404 });
-
-    const convs = await fetchConversations(token, teepAdminIds, cAfter, cBefore);
+    if (!teepAdmins.length)
+      return NextResponse.json({ error: "No TEEP agents matched" }, { status: 404 });
 
     // ── Per-agent accumulator ─────────────────────────────────────────────
-
     type Acc = {
       name: string;
       assigned: number; repliedTo: number; repliesSent: number; closed: number;
       frtSum: number;      frtN:      number;
       handlingSum: number; handlingN: number;
       atfSum: number;      atfN:      number;
-      slaMet: number; slaTotal: number;
+      slaMet: number;      slaTotal:  number;
     };
 
     function emptyAcc(name: string): Acc {
@@ -207,43 +190,48 @@ export async function GET(req: Request) {
       if (!agentMap.has(id)) agentMap.set(id, emptyAcc(decodeName(a.name ?? id)));
     });
 
-    // Process every conversation
-    for (const c of convs) {
-      // Only process conversations assigned to a human admin (not a team or unassigned)
-      if (c.assignee?.type !== "admin" || !c.assignee?.id) continue;
-      const adminId = String(c.assignee.id);
+    // ── Fetch conversations per agent IN PARALLEL ─────────────────────────
+    // Each search is scoped to ONE admin — so we know exactly who each conv belongs to.
+    // This avoids relying on c.assignee which is NOT returned by the search API.
+    const agentResults = await Promise.all(
+      teepAdmins.map(async (a: any) => ({
+        adminId: String(a.id),
+        convs:   await fetchConvsForAdmin(token, String(a.id), uAfter, uBefore),
+      }))
+    );
 
-      if (!agentMap.has(adminId)) {
-        // Auto-discover new agents in CR teams not in the base TEEP list
-        agentMap.set(adminId, emptyAcc(decodeName(nameMap[adminId] ?? c.assignee?.name ?? `Admin ${adminId}`)));
+    // ── Process each agent's conversations ────────────────────────────────
+    for (const { adminId, convs } of agentResults) {
+      const acc = agentMap.get(adminId);
+      if (!acc) continue;
+
+      for (const c of convs) {
+        const stats      = c.statistics ?? {};
+        const frt        = stats.first_response_time   ?? 0;
+        const adminReply = stats.time_to_admin_reply   ?? 0;
+        const handling   = stats.time_to_first_close   ?? 0;
+        const assignment = stats.time_to_assignment    ?? 0;
+        const parts      = stats.count_conversation_parts ?? 0;
+
+        acc.assigned++;
+
+        if (adminReply > 0) {
+          acc.repliedTo++;
+          acc.repliesSent += Math.max(1, Math.floor(parts / 2));
+          acc.slaTotal++;
+          if (adminReply <= SLA_SECS) acc.slaMet++;
+          const atf = adminReply - assignment;
+          if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
+        }
+
+        if (c.state === "closed" || c.state === "resolved") acc.closed++;
+
+        if (frt > 0)      { acc.frtSum      += frt;      acc.frtN++; }
+        if (handling > 0) { acc.handlingSum += handling; acc.handlingN++; }
       }
-
-      const a     = agentMap.get(adminId)!;
-      const stats = c.statistics ?? {};
-      const frt         = stats.first_response_time   ?? 0;
-      const adminReply  = stats.time_to_admin_reply   ?? 0;
-      const handling    = stats.time_to_first_close   ?? 0;
-      const assignment  = stats.time_to_assignment    ?? 0;
-      const parts       = stats.count_conversation_parts ?? 0;
-
-      a.assigned++;
-
-      if (adminReply > 0) {
-        a.repliedTo++;
-        a.repliesSent += Math.max(1, Math.floor(parts / 2));
-        a.slaTotal++;
-        if (adminReply <= SLA_SECS) a.slaMet++;
-        a.atfSum += Math.max(0, adminReply - assignment);
-        a.atfN++;
-      }
-
-      if (c.state === "closed" || c.state === "resolved") a.closed++;
-
-      if (frt > 0)      { a.frtSum      += frt;      a.frtN++; }
-      if (handling > 0) { a.handlingSum += handling; a.handlingN++; }
     }
 
-    // ── Build agent rows ──────────────────────────────────────────────────
+    // ── Build rows — only agents with activity ────────────────────────────
     const activeHours = periodDays * 8;
 
     type AgentRow = {
@@ -262,29 +250,28 @@ export async function GET(req: Request) {
         repliedTo:      a.repliedTo,
         repliesSent:    a.repliesSent,
         closed:         a.closed,
-        avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
-        avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
-        avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
-        repliedPerHour: activeHours > 0  ? (a.repliedTo / activeHours).toFixed(1) : "--",
-        closedPerHour:  activeHours > 0  ? (a.closed    / activeHours).toFixed(1) : "--",
+        avgFrtFmt:      a.frtN > 0       ? fmt(a.frtSum / a.frtN)           : "--",
+        avgHandlingFmt: a.handlingN > 0   ? fmt(a.handlingSum / a.handlingN) : "--",
+        avgAtfFmt:      a.atfN > 0        ? fmt(a.atfSum / a.atfN)           : "--",
+        repliedPerHour: activeHours > 0   ? (a.repliedTo / activeHours).toFixed(1) : "--",
+        closedPerHour:  activeHours > 0   ? (a.closed    / activeHours).toFixed(1) : "--",
         slaMet:         a.slaMet,
         slaTotal:       a.slaTotal,
         slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
       }))
       .sort((a, b) => b.closed - a.closed);
 
-    // ── Summary row (totals / weighted averages) ──────────────────────────
-    const totalAssigned    = rows.reduce((s, r) => s + r.assigned, 0);
-    const totalRepliedTo   = rows.reduce((s, r) => s + r.repliedTo, 0);
+    // ── Summary row ───────────────────────────────────────────────────────
+    const totalAssigned    = rows.reduce((s, r) => s + r.assigned,    0);
+    const totalRepliedTo   = rows.reduce((s, r) => s + r.repliedTo,   0);
     const totalRepliesSent = rows.reduce((s, r) => s + r.repliesSent, 0);
-    const totalClosed      = rows.reduce((s, r) => s + r.closed, 0);
-    const totalSlaMet      = rows.reduce((s, r) => s + r.slaMet, 0);
-    const totalSlaTotal    = rows.reduce((s, r) => s + r.slaTotal, 0);
+    const totalClosed      = rows.reduce((s, r) => s + r.closed,      0);
+    const totalSlaMet      = rows.reduce((s, r) => s + r.slaMet,      0);
+    const totalSlaTotal    = rows.reduce((s, r) => s + r.slaTotal,    0);
 
-    // Weighted avg FRT and handling
     let wFrtSum = 0, wFrtN = 0, wHandlingSum = 0, wHandlingN = 0;
     for (const a of agentMap.values()) {
-      wFrtSum      += a.frtSum;      wFrtN      += a.frtN;
+      wFrtSum += a.frtSum; wFrtN += a.frtN;
       wHandlingSum += a.handlingSum; wHandlingN += a.handlingN;
     }
 
@@ -319,6 +306,7 @@ export async function GET(req: Request) {
       summaryRow,
       agents: rows,
     });
+
   } catch (err) {
     return NextResponse.json(
       { error: err instanceof Error ? err.message : String(err) },
