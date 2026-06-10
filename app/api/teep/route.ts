@@ -207,10 +207,9 @@ export async function GET(req: Request) {
 
       for (const c of convs) {
         const stats      = c.statistics ?? {};
-        const frt        = stats.first_response_time   ?? 0;
-        const adminReply = stats.time_to_admin_reply   ?? 0;
-        const handling   = stats.time_to_first_close   ?? 0;
-        const assignment = stats.time_to_assignment    ?? 0;
+        const adminReply = stats.time_to_admin_reply      ?? 0;
+        const handling   = stats.time_to_first_close      ?? 0;
+        const assignment = stats.time_to_assignment       ?? 0;
         const parts      = stats.count_conversation_parts ?? 0;
 
         acc.assigned++;
@@ -220,14 +219,29 @@ export async function GET(req: Request) {
           acc.repliesSent += Math.max(1, Math.floor(parts / 2));
           acc.slaTotal++;
           if (adminReply <= SLA_SECS) acc.slaMet++;
-          const atf = adminReply - assignment;
+
+          // FRT = time_to_admin_reply: time from creation to first HUMAN reply
+          // (first_response_time = FIN AI bot reply, near-instant, useless here)
+          acc.frtSum += adminReply;
+          acc.frtN++;
+
+          // ATF = human reply time minus team-assignment time (best available proxy)
+          const atf = adminReply - Math.max(0, assignment);
           if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
         }
 
         if (c.state === "closed" || c.state === "resolved") acc.closed++;
 
-        if (frt > 0)      { acc.frtSum      += frt;      acc.frtN++; }
-        if (handling > 0) { acc.handlingSum += handling; acc.handlingN++; }
+        // Handling = first human reply → close  (removes queue-wait before agent picked up)
+        // Matches Intercom's "Teammate handling time" more closely than time_to_first_close alone
+        if (handling > 0 && adminReply > 0 && handling > adminReply) {
+          acc.handlingSum += handling - adminReply;
+          acc.handlingN++;
+        } else if (handling > 0 && adminReply === 0) {
+          // No reply recorded — fall back to full close time
+          acc.handlingSum += handling;
+          acc.handlingN++;
+        }
       }
     }
 
@@ -269,10 +283,11 @@ export async function GET(req: Request) {
     const totalSlaMet      = rows.reduce((s, r) => s + r.slaMet,      0);
     const totalSlaTotal    = rows.reduce((s, r) => s + r.slaTotal,    0);
 
-    let wFrtSum = 0, wFrtN = 0, wHandlingSum = 0, wHandlingN = 0;
+    let wFrtSum = 0, wFrtN = 0, wHandlingSum = 0, wHandlingN = 0, wAtfSum = 0, wAtfN = 0;
     for (const a of agentMap.values()) {
-      wFrtSum += a.frtSum; wFrtN += a.frtN;
+      wFrtSum      += a.frtSum;      wFrtN      += a.frtN;
       wHandlingSum += a.handlingSum; wHandlingN += a.handlingN;
+      wAtfSum      += a.atfSum;      wAtfN      += a.atfN;
     }
 
     const summaryRow: AgentRow = {
@@ -283,7 +298,7 @@ export async function GET(req: Request) {
       closed:         totalClosed,
       avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
-      avgAtfFmt:      "--",
+      avgAtfFmt:      wAtfN > 0 ? fmt(wAtfSum / wAtfN) : "--",
       repliedPerHour: activeHours > 0 ? (totalRepliedTo / activeHours).toFixed(1) : "--",
       closedPerHour:  activeHours > 0 ? (totalClosed    / activeHours).toFixed(1) : "--",
       slaMet:         totalSlaMet,
