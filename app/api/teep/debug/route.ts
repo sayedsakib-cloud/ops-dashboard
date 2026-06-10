@@ -254,6 +254,40 @@ export async function GET(req: Request) {
       })(),
 
       // STEP 7: Any conversations (no filters)
+      // STEP 9: Test if statistics.last_close_at is a valid search field
+      test_last_close_searchable: await (async () => {
+        const b = {
+          query: {
+            operator: "AND",
+            value: [
+              { field: "source.type",              operator: "=", value: "email" },
+              { field: "team_assignee_id",          operator: "=", value: 6813596 },
+              { field: "statistics.last_close_at",  operator: ">", value: d7      },
+            ],
+          },
+          pagination: { per_page: 3 },
+        };
+        const r = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Intercom-Version": "2.11" },
+          body: JSON.stringify(b),
+        });
+        const d = await r.json();
+        return {
+          is_valid_field: !d.errors,
+          errors:         d.errors ?? null,
+          total:          d.total_count ?? 0,
+          sample: (d.conversations ?? []).slice(0, 3).map((c: any) => ({
+            id:               c.id,
+            state:            c.state,
+            admin_assignee_id: c.admin_assignee_id,
+            updated_at:       c.updated_at,
+            last_close_at:    c.statistics?.last_close_at,
+          })),
+        };
+      })(),
+
+      // STEP 7: Any conversations (no filters)
       conv_any_last_7_days: {
         total: anyConv.total_count ?? 0,
         sample: (anyConv.conversations ?? []).slice(0, 3).map((c: any) => ({
