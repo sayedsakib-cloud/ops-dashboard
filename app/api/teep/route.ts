@@ -46,7 +46,10 @@ const getCRTeams = unstable_cache(
     });
     const data = await res.json();
     return (data.teams ?? [])
-      .filter((t: any) => (t.name ?? "").startsWith("CR"))
+      .filter((t: any) =>
+        (t.name ?? "").startsWith("CR") &&
+        t.name !== "CR - Ticket Dependencies"
+      )
       .map((t: any) => ({ id: String(t.id), name: t.name }));
   },
   ["intercom-cr-teams"],
