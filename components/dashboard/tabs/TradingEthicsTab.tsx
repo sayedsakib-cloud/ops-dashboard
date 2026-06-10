@@ -12,6 +12,7 @@ type AgentRow = {
 type TeepData = {
   summary: {
     totalClosed: number;
+    avgFrtFmt: string;
     avgHandlingFmt: string;
     slaRate: number;
     slaMetCount: number;
@@ -181,11 +182,11 @@ export default function TradingEthicsTab() {
               sub={`Last ${data!.periodDays} day${data!.periodDays > 1 ? "s" : ""}`}
             />
 
-            {/* Avg Handling Time */}
+            {/* Avg First Response Time */}
             <SummaryCard
-              label="Avg Teammate Handling Time"
-              value={s.avgHandlingFmt}
-              sub="Avg time from assignment to close"
+              label="Avg First Response Time"
+              value={s.avgFrtFmt}
+              sub="Avg time to first human reply (excl. FIN AI)"
             />
 
             {/* Top 3 Agents */}
