@@ -213,6 +213,43 @@ export async function GET(req: Request) {
         };
       })(),
 
+      // STEP 8: CLOSED convs in first CR team — does assignee come back?
+      conv_closed_with_assignee: await (async () => {
+        const b = {
+          query: {
+            operator: "AND",
+            value: [
+              { field: "source.type",      operator: "=", value: "email"    },
+              { field: "team_assignee_id", operator: "=", value: 6813596    },
+              { field: "state",            operator: "=", value: "closed"   },
+              { field: "updated_at",       operator: ">", value: d7         },
+            ],
+          },
+          pagination: { per_page: 5 },
+        };
+        const r = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Intercom-Version": "2.11" },
+          body: JSON.stringify(b),
+        });
+        const d = await r.json();
+        return {
+          total: d.total_count ?? 0,
+          sample: (d.conversations ?? []).slice(0, 5).map((c: any) => ({
+            id:               c.id,
+            state:            c.state,
+            assignee_type:    c.assignee?.type,
+            assignee_id:      c.assignee?.id,
+            assignee_name:    c.assignee?.name,
+            team_assignee_id: c.team_assignee_id,
+            updated_at:       c.updated_at,
+            stats_last_close: c.statistics?.last_close_at,
+            stats_frt:        c.statistics?.first_response_time,
+            stats_admin_reply: c.statistics?.time_to_admin_reply,
+          })),
+        };
+      })(),
+
       // STEP 7: Any conversations (no filters)
       conv_any_last_7_days: {
         total: anyConv.total_count ?? 0,
