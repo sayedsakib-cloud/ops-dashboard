@@ -39,6 +39,11 @@ function normName(s: string): string {
     .replace(/\u2019/g, "'"); // curly apostrophe
 }
 
+/** Decode HTML entities in display names (Intercom stores "O&#39;Brian") */
+function decodeName(s: string): string {
+  return (s ?? "").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
+}
+
 // ── Cached: CR teams (1-hour TTL) ─────────────────────────────────────────
 const getCRTeams = unstable_cache(
   async (): Promise<{ id: string; name: string }[]> => {
@@ -76,22 +81,24 @@ const getAdmins = unstable_cache(
 
 // ── Conversations fetch with parallel pagination ───────────────────────────
 async function fetchConversations(
-  token:      string,
-  crTeamIds:  string[],
-  cAfter:     number,
-  cBefore:    number,
+  token:         string,
+  teepAdminIds:  string[],
+  cAfter:        number,
+  cBefore:       number,
 ): Promise<any[]> {
-  if (!crTeamIds.length) return [];
+  if (!teepAdminIds.length) return [];
 
-  const teamClauses = crTeamIds.map(id => ({
-    field: "team_assignee_id", operator: "=", value: parseInt(id),
+  // Search by individual admin IDs — team-queue conversations have null assignee
+  // so searching by team would return 0 agent-attributed conversations
+  const adminClauses = teepAdminIds.map(id => ({
+    field: "admin_assignee_id", operator: "=", value: parseInt(id),
   }));
 
   const query = {
     operator: "AND",
     value: [
       { field: "source.type", operator: "=", value: "email" },
-      teamClauses.length > 1 ? { operator: "OR", value: teamClauses } : teamClauses[0],
+      adminClauses.length > 1 ? { operator: "OR", value: adminClauses } : adminClauses[0],
       { field: "created_at", operator: ">", value: cAfter  },
       { field: "created_at", operator: "<", value: cBefore },
     ],
@@ -159,9 +166,22 @@ export async function GET(req: Request) {
     if (!crTeams.length)
       return NextResponse.json({ error: "No CR teams found in workspace" }, { status: 404 });
 
-    const convs = await fetchConversations(token, crTeams.map(t => t.id), cAfter, cBefore);
+    // Resolve TEEP admin IDs before fetching conversations
+    const teepAdmins = admins.filter((a: any) =>
+      TEEP_AGENT_NAMES.some(n =>
+        normName(a.name).includes(normName(n)) ||
+        normName(n).includes(normName(a.name))
+      )
+    );
+    const teepAdminIds = teepAdmins.map((a: any) => String(a.id));
+
+    if (!teepAdminIds.length)
+      return NextResponse.json({ error: "No TEEP agents matched in workspace" }, { status: 404 });
+
+    const convs = await fetchConversations(token, teepAdminIds, cAfter, cBefore);
 
     // ── Per-agent accumulator ─────────────────────────────────────────────
+
     type Acc = {
       name: string;
       assigned: number; repliedTo: number; repliesSent: number; closed: number;
@@ -181,25 +201,21 @@ export async function GET(req: Request) {
 
     const agentMap = new Map<string, Acc>();
 
-    // Pre-populate all base TEEP agents (even if 0 conversations this period)
-    admins
-      .filter((a: any) => TEEP_AGENT_NAMES.some(n =>
-        normName(a.name).includes(normName(n)) ||
-        normName(n).includes(normName(a.name))
-      ))
-      .forEach((a: any) => {
-        const id = String(a.id);
-        if (!agentMap.has(id)) agentMap.set(id, emptyAcc(a.name ?? id));
-      });
+    // Pre-populate all matched TEEP agents
+    teepAdmins.forEach((a: any) => {
+      const id = String(a.id);
+      if (!agentMap.has(id)) agentMap.set(id, emptyAcc(decodeName(a.name ?? id)));
+    });
 
     // Process every conversation
     for (const c of convs) {
-      const adminId = c.assignee?.id ? String(c.assignee.id) : null;
-      if (!adminId) continue;
+      // Only process conversations assigned to a human admin (not a team or unassigned)
+      if (c.assignee?.type !== "admin" || !c.assignee?.id) continue;
+      const adminId = String(c.assignee.id);
 
       if (!agentMap.has(adminId)) {
-        // Auto-discover new agents not in base list
-        agentMap.set(adminId, emptyAcc(nameMap[adminId] ?? c.assignee?.name ?? `Admin ${adminId}`));
+        // Auto-discover new agents in CR teams not in the base TEEP list
+        agentMap.set(adminId, emptyAcc(decodeName(nameMap[adminId] ?? c.assignee?.name ?? `Admin ${adminId}`)));
       }
 
       const a     = agentMap.get(adminId)!;
@@ -239,6 +255,7 @@ export async function GET(req: Request) {
     };
 
     const rows: AgentRow[] = [...agentMap.values()]
+      .filter(a => a.assigned > 0 || a.repliedTo > 0 || a.closed > 0)
       .map(a => ({
         name:           a.name,
         assigned:       a.assigned,
