@@ -52,14 +52,10 @@ function SummaryCard({
 }) {
   return (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-0.5">
-        {label}
-        {tip && <InfoTooltip text={tip} />}
-      </p>
-      )}
-      {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
-      {children}
-    </div>
+      <div className="flex items-center gap-0.5 mb-2">
+        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
+        {tip ? <InfoTooltip text={tip} /> : null}
+      </div>
   );
 }
 
@@ -89,10 +85,12 @@ function TH({ cols }: { cols: ColDef[] }) {
           const tip   = typeof c === "string" ? undefined : c.tip;
           return (
             <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-              <span className="flex items-center gap-0.5">
-                {label}
-                {tip && <InfoTooltip text={tip} />}
-              </span>
+              {tip ? (
+                <span className="flex items-center gap-0.5">
+                  {label}
+                  <InfoTooltip text={tip} />
+                </span>
+              ) : label}
             </th>
           );
         })}
@@ -100,7 +98,6 @@ function TH({ cols }: { cols: ColDef[] }) {
     </thead>
   );
 }
-
 // ── Info tooltip ───────────────────────────────────────────────────────────
 function InfoTooltip({ text }: { text: string }) {
   return (
