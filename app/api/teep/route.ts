@@ -292,7 +292,7 @@ export async function GET(req: Request) {
           agentMap.get(closerIds[0])!.closed++;
           closeCounted.add(c.id);
           // If conversation was reopened, fetch parts to count re-close events
-          if (countReopens > 0) needsParts.add(c.id);
+          //if (countReopens > 0) needsParts.add(c.id);
         } else {
           // Unattributed — fetch parts to find who closed it
           needsParts.add(c.id);
@@ -308,7 +308,7 @@ export async function GET(req: Request) {
       if (closerIds.length > 0) {
         agentMap.get(closerIds[0])!.closed++;
         closeCounted.add(c.id);
-        if (countReopens > 0) needsParts.add(c.id);
+        //if (countReopens > 0) needsParts.add(c.id);
       } else {
         needsParts.add(c.id);
       }
@@ -327,21 +327,12 @@ export async function GET(req: Request) {
           batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
         );
 
-        for (let j = 0; j < batch.length; j++) {
-          const convId  = batch[j];
-          const events  = results[j];
-          const alreadyCounted = closeCounted.has(convId);
-
-          for (let k = 0; k < events.length; k++) {
-            const { adminId } = events[k];
-            if (!teepAdminIdSet.has(adminId)) continue;
-
-            if (!alreadyCounted || k > 0) {
-              // First event: if not yet counted, add close
-              // Subsequent events: always add (re-close events)
-              agentMap.get(adminId)!.closed++;
-            }
-          }
+        // These are only unattributed conversations (closeCounted is false for all in needsParts now).
+        // Count the FIRST close event by a TEEP agent in the period — matches Intercom's
+        // "unique conversations closed" definition (each conversation counted once).
+        const firstTeepClose = events.find(e => teepAdminIdSet.has(e.adminId));
+        if (firstTeepClose) {
+          agentMap.get(firstTeepClose.adminId)!.closed++;
         }
       }
     }
