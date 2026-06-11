@@ -45,16 +45,17 @@ function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "xs" }) {
 
 // ── Summary card ───────────────────────────────────────────────────────────
 function SummaryCard({
-  label, value, sub, valueColor, children,
+  label, value, sub, valueColor, tip, children,
 }: {
   label: string; value?: string | number; sub?: string;
-  valueColor?: string; children?: React.ReactNode;
+  valueColor?: string; tip?: string; children?: React.ReactNode;
 }) {
   return (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{label}</p>
-      {value !== undefined && (
-        <p className={`text-2xl font-bold ${valueColor ?? "text-gray-900"}`}>{value}</p>
+      <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2 flex items-center gap-0.5">
+        {label}
+        {tip && <InfoTooltip text={tip} />}
+      </p>
       )}
       {sub && <p className="text-xs text-gray-400 mt-1">{sub}</p>}
       {children}
@@ -77,21 +78,45 @@ function SlaBar({ rate }: { rate: number }) {
 }
 
 // ── Table head row ─────────────────────────────────────────────────────────
-function TH({ cols }: { cols: string[] }) {
+type ColDef = string | { label: string; tip: string };
+
+function TH({ cols }: { cols: ColDef[] }) {
   return (
     <thead>
       <tr className="bg-gray-900 text-white">
-        {cols.map(c => (
-          <th key={c} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-            {c}
-          </th>
-        ))}
+        {cols.map(c => {
+          const label = typeof c === "string" ? c : c.label;
+          const tip   = typeof c === "string" ? undefined : c.tip;
+          return (
+            <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
+              <span className="flex items-center gap-0.5">
+                {label}
+                {tip && <InfoTooltip text={tip} />}
+              </span>
+            </th>
+          );
+        })}
       </tr>
     </thead>
   );
 }
 
+// ── Info tooltip ───────────────────────────────────────────────────────────
+function InfoTooltip({ text }: { text: string }) {
+  return (
+    <span className="relative group inline-flex items-center cursor-help ml-0.5 align-middle">
+      <span className="w-3.5 h-3.5 rounded-full bg-gray-400 text-white text-[9px] flex items-center justify-center font-bold hover:bg-gray-500 transition-colors flex-shrink-0">
+        i
+      </span>
+      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-gray-900 text-white text-xs rounded-md px-2.5 py-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed font-normal normal-case tracking-normal whitespace-normal shadow-xl">
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ── Main component ─────────────────────────────────────────────────────────
+
 export default function TradingEthicsTab() {
   const [data,    setData]    = useState<TeepData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -180,6 +205,7 @@ export default function TradingEthicsTab() {
               label="Emails Closed"
               value={s.totalClosed.toLocaleString()}
               sub={`Last ${data!.periodDays} day${data!.periodDays > 1 ? "s" : ""}`}
+              tip="Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured. Typically ~10% lower than Intercom's 'Closed by teammates' metric due to public API limitations."
             />
 
             {/* Avg First Response Time */}
@@ -226,7 +252,13 @@ export default function TradingEthicsTab() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <TH cols={["Teammate", "Conversations Assigned", "Conversations Replied To", "Replies Sent", "Closed Conversations"]} />
+                <TH cols={[
+                  "Teammate",
+                  "Conversations Assigned",
+                  "Conversations Replied To",
+                  "Replies Sent",
+                  { label: "Closed Conversations", tip: "Conversations closed in the period attributed via current assignment or teammates. ~10% below Intercom due to conversations closed without formal agent assignment (API limitation)." },
+                ]} />
                 <tbody>
                   {/* Summary row */}
                   {(() => {
@@ -274,11 +306,11 @@ export default function TradingEthicsTab() {
               <table className="w-full text-sm">
                 <TH cols={[
                   "Teammate",
-                  "Avg First Response Time",
-                  "Avg Handling Time",
-                  "Avg Assignment to 1st Response",
-                  "Conv. Replied / Active Hr",
-                  "Conv. Closed / Active Hr",
+                  { label: "Avg First Response Time",          tip: "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only. May differ slightly from Intercom due to conversation-level vs agent-level statistics." },
+                  { label: "Avg Handling Time",                tip: "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent-specific assignment to close, which requires parts-level data not available via the public API." },
+                  { label: "Avg Assignment to 1st Response",   tip: "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to the team (time_to_assignment approaches 0) rather than directly to the agent." },
+                  { label: "Conv. Replied / 8h day",           tip: "Conversations replied to divided by (period days x 8h). Intercom uses actual agent logged-in time as the denominator (e.g. 12h 6m), which is not available via the public API." },
+                  { label: "Conv. Closed / 8h day",            tip: "Conversations closed divided by (period days x 8h). Intercom uses actual agent logged-in time as the denominator, which is not available via the public API." },
                 ]} />
                 <tbody>
                   {/* Summary row */}
