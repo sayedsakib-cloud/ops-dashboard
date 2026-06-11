@@ -247,8 +247,10 @@ export async function GET(req: Request) {
             // all top-level keys to see everything returned
             all_keys:            Object.keys(c),
             updated_at:          c.updated_at,
-            stats_last_close:    c.statistics?.last_close_at,
-            stats_admin_reply:   c.statistics?.time_to_admin_reply,
+            stats_last_close:  c.statistics?.last_close_at,
+            stats_admin_reply: c.statistics?.time_to_admin_reply,
+            teammates_raw:     c.teammates,
+            teammates_keys:    c.teammates ? Object.keys(c.teammates) : [],
           })),
         };
       })(),
@@ -280,9 +282,11 @@ export async function GET(req: Request) {
           sample: (d.conversations ?? []).slice(0, 3).map((c: any) => ({
             id:               c.id,
             state:            c.state,
-            admin_assignee_id: c.admin_assignee_id,
             updated_at:       c.updated_at,
-            last_close_at:    c.statistics?.last_close_at,
+            last_close_at:     c.statistics?.last_close_at,
+            admin_assignee_id: c.admin_assignee_id,
+            teammates_raw:     c.teammates,
+            teammates_keys:    c.teammates ? Object.keys(c.teammates) : [],
           })),
         };
       })(),
