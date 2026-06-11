@@ -253,8 +253,7 @@ export async function GET(req: Request) {
       const handling    = stats.time_to_first_close      ?? 0;
       const assignment  = stats.time_to_assignment       ?? 0;
       const parts       = stats.count_conversation_parts ?? 0;
-      const lastCloseAt = stats.last_close_at            ?? 0;
-      const countReopens= stats.count_reopens            ?? 0;
+      const lastCloseAt = stats.last_close_at ?? 0;
 
       // Assigned (formal assignment only)
       if (c.admin_assignee_id && teepAdminIdSet.has(String(c.admin_assignee_id))) {
@@ -303,7 +302,6 @@ export async function GET(req: Request) {
     // ── Pass 2: closed-only (closed in period, now reopened) ──────────────
     for (const c of closedOnlyConvs) {
       const stats        = c.statistics ?? {};
-      const countReopens = stats.count_reopens ?? 0;
       const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
       if (closerIds.length > 0) {
         agentMap.get(closerIds[0])!.closed++;
@@ -327,12 +325,12 @@ export async function GET(req: Request) {
           batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
         );
 
-        // These are only unattributed conversations (closeCounted is false for all in needsParts now).
-        // Count the FIRST close event by a TEEP agent in the period — matches Intercom's
-        // "unique conversations closed" definition (each conversation counted once).
-        const firstTeepClose = events.find(e => teepAdminIdSet.has(e.adminId));
-        if (firstTeepClose) {
-          agentMap.get(firstTeepClose.adminId)!.closed++;
+        for (const events of results) {
+          // Count the FIRST close by a TEEP agent in the period (unique conversation = count once)
+          const firstTeepClose = events.find((e: any) => teepAdminIdSet.has(e.adminId));
+          if (firstTeepClose) {
+            agentMap.get(firstTeepClose.adminId)!.closed++;
+          }
         }
       }
     }
