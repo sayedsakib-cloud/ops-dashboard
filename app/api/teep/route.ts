@@ -290,6 +290,7 @@ export async function GET(req: Request) {
         if (closerIds.length > 0) {
           agentMap.get(closerIds[0])!.closed++;
           closeCounted.add(c.id);
+          if ((stats.count_reopens ?? 0) > 0) needsParts.add(c.id);
           // If conversation was reopened, fetch parts to count re-close events
           //if (countReopens > 0) needsParts.add(c.id);
         } else {
@@ -302,10 +303,12 @@ export async function GET(req: Request) {
     // ── Pass 2: closed-only (closed in period, now reopened) ──────────────
     for (const c of closedOnlyConvs) {
       const stats        = c.statistics ?? {};
+      const countReopens = stats.count_reopens ?? 0;
       const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
       if (closerIds.length > 0) {
         agentMap.get(closerIds[0])!.closed++;
         closeCounted.add(c.id);
+        if (countReopens > 0) needsParts.add(c.id);
         //if (countReopens > 0) needsParts.add(c.id);
       } else {
         needsParts.add(c.id);
@@ -325,11 +328,26 @@ export async function GET(req: Request) {
           batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
         );
 
-        for (const events of results) {
-          // Count the FIRST close by a TEEP agent in the period (unique conversation = count once)
-          const firstTeepClose = events.find((e: any) => teepAdminIdSet.has(e.adminId));
-          if (firstTeepClose) {
-            agentMap.get(firstTeepClose.adminId)!.closed++;
+        for (let j = 0; j < batch.length; j++) {
+          const convId  = batch[j];
+          const events  = results[j];
+          const alreadyCounted = closeCounted.has(convId);
+
+          if (alreadyCounted) {
+            // Re-close events: add events BEFORE the last one.
+            // The last event = last_close_at, already counted in Pass 1/2. Skip it.
+            for (let k = 0; k < events.length - 1; k++) {
+              const { adminId } = events[k];
+              if (teepAdminIdSet.has(adminId)) {
+                agentMap.get(adminId)!.closed++;
+              }
+            }
+          } else {
+            // Unattributed: count first TEEP close in the period only
+            const firstTeepClose = events.find((e: any) => teepAdminIdSet.has(e.adminId));
+            if (firstTeepClose) {
+              agentMap.get(firstTeepClose.adminId)!.closed++;
+            }
           }
         }
       }
