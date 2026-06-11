@@ -36,7 +36,50 @@ function decodeName(s: string): string {
   return (s ?? "").replace(/&#39;/g, "'").replace(/&amp;/g, "&").replace(/&quot;/g, '"');
 }
 
-// ── Cached: CR teams — excludes Ticket Dependencies ───────────────────────
+// ── Teammates field parser ─────────────────────────────────────────────────
+// Intercom search results return `teammates` as a nested object:
+// { type: "admin.list", teammates: [{ type: "admin", id: 12345 }, ...] }
+// When admin_assignee_id is null the agent replied/closed without being
+// formally assigned — they still appear in the teammates list.
+function parseTeammates(c: any): string[] {
+  const raw = c.teammates;
+  if (!raw) return [];
+  // Handle { type:"admin.list", teammates:[...] } structure
+  let list: any[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (Array.isArray(raw.teammates)) {
+    list = raw.teammates;
+  } else if (Array.isArray(raw.admins)) {
+    list = raw.admins;
+  }
+  return list.map((m: any) => String(m.id ?? m)).filter(Boolean);
+}
+
+// Primary attribution: admin_assignee_id.
+// Fallback attribution: teammates (handles unassigned workflow where agents
+// reply/close without being formally assigned — very common in CR inboxes).
+function resolveAgent(
+  c: any,
+  teepSet: Set<string>,
+  mode: "single" | "all",
+): string[] {
+  // Primary: formally assigned TEEP agent
+  if (c.admin_assignee_id && teepSet.has(String(c.admin_assignee_id))) {
+    return [String(c.admin_assignee_id)];
+  }
+  // Fallback: TEEP agents found in teammates (unassigned workflow)
+  const teepMates = parseTeammates(c).filter(id => teepSet.has(id));
+  if (mode === "single") {
+    // For CLOSED attribution: credit first TEEP teammate
+    // (most conversations in this workflow have exactly one TEEP agent)
+    return teepMates.length > 0 ? [teepMates[0]] : [];
+  }
+  // mode === "all": for REPLIED TO — credit every TEEP agent who participated
+  return teepMates;
+}
+
+// ── Cached: CR teams (excludes Ticket Dependencies) ───────────────────────
 const getCRTeams = unstable_cache(
   async (): Promise<{ id: string; name: string }[]> => {
     const token = process.env.INTERCOM_ACCESS_TOKEN!;
@@ -52,7 +95,7 @@ const getCRTeams = unstable_cache(
       )
       .map((t: any) => ({ id: String(t.id), name: t.name }));
   },
-  ["intercom-cr-teams-v2"],
+  ["intercom-cr-teams-v3"],
   { revalidate: 3600 }
 );
 
@@ -74,11 +117,11 @@ const getAdmins = unstable_cache(
   { revalidate: 3600 }
 );
 
-// ── Cursor-paginated search for one team with a given date field ───────────
+// ── Cursor-paginated search for one team, one date field ───────────────────
 async function fetchConvsForTeamByField(
   token:     string,
   teamId:    string,
-  dateField: string,   // "updated_at" or "statistics.last_close_at"
+  dateField: string,
   after:     number,
   before:    number,
 ): Promise<any[]> {
@@ -90,10 +133,10 @@ async function fetchConvsForTeamByField(
   const query = {
     operator: "AND",
     value: [
-      { field: "source.type",      operator: "=", value: "email"           },
-      { field: "team_assignee_id", operator: "=", value: parseInt(teamId)  },
-      { field: dateField,          operator: ">", value: after             },
-      { field: dateField,          operator: "<", value: before            },
+      { field: "source.type",      operator: "=", value: "email"          },
+      { field: "team_assignee_id", operator: "=", value: parseInt(teamId) },
+      { field: dateField,          operator: ">", value: after            },
+      { field: dateField,          operator: "<", value: before           },
     ],
   };
 
@@ -139,7 +182,7 @@ export async function GET(req: Request) {
     const uBefore = endDate   ? toUnixEnd(endDate)     : now;
     const periodDays = Math.max(1, Math.round((uBefore - uAfter) / 86400));
 
-    const [crTeams, { nameMap, admins }] = await Promise.all([
+    const [crTeams, { admins }] = await Promise.all([
       getCRTeams(),
       getAdmins(),
     ]);
@@ -158,24 +201,23 @@ export async function GET(req: Request) {
     if (!teepAdmins.length)
       return NextResponse.json({ error: "No TEEP agents matched" }, { status: 404 });
 
-    // ── Two searches per team, all teams in parallel ───────────────────────
-    // Search A: updated_at in period  → activity metrics (assign, reply, timing, closed)
-    // Search B: last_close_at in period → supplementary closed-only count
-    //   Conversations in B but not A were closed in period then reopened.
-    //   We can attribute them via admin_assignee_id (if non-null TEEP agent).
+    // ── Two searches per team, all in parallel ────────────────────────────
+    // Search A (updated_at):        activity metrics — assign, reply, timing, SLA
+    // Search B (last_close_at):     supplementary closed count
+    //   Both use teammates fallback for unassigned workflow conversations.
     const teamResults = await Promise.all(
       crTeams.map(async (t) => {
         const [activityConvs, closedConvs] = await Promise.all([
-          fetchConvsForTeamByField(token, t.id, "updated_at",                uAfter, uBefore),
-          fetchConvsForTeamByField(token, t.id, "statistics.last_close_at",  uAfter, uBefore),
+          fetchConvsForTeamByField(token, t.id, "updated_at",               uAfter, uBefore),
+          fetchConvsForTeamByField(token, t.id, "statistics.last_close_at", uAfter, uBefore),
         ]);
         return { activityConvs, closedConvs };
       })
     );
 
-    // Global merge: activity set first, then find closed-only extras
-    const activityConvs: any[]    = [];
-    const activityIdSet           = new Set<string>();
+    // Merge: activity set + closed-only extras (closed in period, now reopened)
+    const activityConvs: any[] = [];
+    const activityIdSet        = new Set<string>();
     const closedOnlyConvs: any[]  = [];
     const closedOnlySeen          = new Set<string>();
 
@@ -216,56 +258,63 @@ export async function GET(req: Request) {
 
     // ── Pass 1: activity conversations — full metrics ─────────────────────
     for (const c of activityConvs) {
-      const adminId = c.admin_assignee_id ? String(c.admin_assignee_id) : null;
-      if (!adminId || !teepAdminIdSet.has(adminId)) continue;
+      const stats      = c.statistics ?? {};
+      const adminReply = stats.time_to_admin_reply   ?? 0;
+      const handling   = stats.time_to_first_close   ?? 0;
+      const assignment = stats.time_to_assignment    ?? 0;
+      const parts      = stats.count_conversation_parts ?? 0;
+      const lastCloseAt = stats.last_close_at        ?? 0;
 
-      const acc   = agentMap.get(adminId)!;
-      const stats = c.statistics ?? {};
-
-      const adminReply  = stats.time_to_admin_reply   ?? 0;
-      const handling    = stats.time_to_first_close   ?? 0;
-      const assignment  = stats.time_to_assignment    ?? 0;
-      const parts       = stats.count_conversation_parts ?? 0;
-      const lastCloseAt = stats.last_close_at         ?? 0;
-
-      acc.assigned++;
-
-      if (adminReply > 0) {
-        acc.repliedTo++;
-        acc.repliesSent += Math.max(1, Math.floor(parts / 2));
-        acc.slaTotal++;
-        if (adminReply <= SLA_SECS) acc.slaMet++;
-        acc.frtSum += adminReply;
-        acc.frtN++;
-        const atf = adminReply - Math.max(0, assignment);
-        if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
+      // "Assigned" — only counts formal assignment (admin_assignee_id)
+      const assignedId = c.admin_assignee_id ? String(c.admin_assignee_id) : null;
+      if (assignedId && teepAdminIdSet.has(assignedId)) {
+        agentMap.get(assignedId)!.assigned++;
       }
 
-      // Closed: use last_close_at for precision; fallback to state
-      const closedInPeriod = lastCloseAt > 0
-        ? (lastCloseAt >= uAfter && lastCloseAt <= uBefore)
-        : (c.state === "closed" || c.state === "resolved");
-      if (closedInPeriod) acc.closed++;
+      // "Replied To" — count for EVERY TEEP agent who participated
+      // This covers unassigned workflow: agents who replied without being assigned
+      const replierIds = resolveAgent(c, teepAdminIdSet, "all");
+      for (const rid of replierIds) {
+        const acc = agentMap.get(rid)!;
+        if (adminReply > 0) {
+          acc.repliedTo++;
+          acc.repliesSent += Math.max(1, Math.floor(parts / (replierIds.length || 1) / 2));
+          acc.slaTotal++;
+          if (adminReply <= SLA_SECS) acc.slaMet++;
+          acc.frtSum += adminReply;
+          acc.frtN++;
+          const atf = adminReply - Math.max(0, assignment);
+          if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
+        }
+        if (handling > 0 && adminReply > 0 && handling > adminReply) {
+          acc.handlingSum += handling - adminReply;
+          acc.handlingN++;
+        } else if (handling > 0 && adminReply === 0) {
+          acc.handlingSum += handling;
+          acc.handlingN++;
+        }
+      }
 
-      // Handling = first human reply to close (active working time)
-      if (handling > 0 && adminReply > 0 && handling > adminReply) {
-        acc.handlingSum += handling - adminReply;
-        acc.handlingN++;
-      } else if (handling > 0 && adminReply === 0) {
-        acc.handlingSum += handling;
-        acc.handlingN++;
+      // "Closed" — single attribution (first TEEP agent found via assignee or teammates)
+      const closerIds = resolveAgent(c, teepAdminIdSet, "single");
+      if (closerIds.length > 0) {
+        const acc = agentMap.get(closerIds[0])!;
+        const closedInPeriod = lastCloseAt > 0
+          ? (lastCloseAt >= uAfter && lastCloseAt <= uBefore)
+          : (c.state === "closed" || c.state === "resolved");
+        if (closedInPeriod) acc.closed++;
       }
     }
 
-    // ── Pass 2: closed-only conversations (closed in period, now reopened) ─
-    // Only add to `closed` count — no timing/activity data since updated_at
-    // is outside the period and stats reflect post-reopen state.
+    // ── Pass 2: closed-only (closed in period, now reopened) ──────────────
+    // These were closed in period but client replied after → updated_at
+    // moved outside our window. Use last_close_at search to capture them.
+    // Apply same teammates fallback for unassigned workflow.
     for (const c of closedOnlyConvs) {
-      const adminId = c.admin_assignee_id ? String(c.admin_assignee_id) : null;
-      if (!adminId || !teepAdminIdSet.has(adminId)) continue;
-      // Null admin_assignee_id = automation-closed (excluded per Intercom definition)
-      const acc = agentMap.get(adminId)!;
-      acc.closed++;
+      const closerIds = resolveAgent(c, teepAdminIdSet, "single");
+      if (closerIds.length > 0) {
+        agentMap.get(closerIds[0])!.closed++;
+      }
     }
 
     // ── Build rows ────────────────────────────────────────────────────────
@@ -336,9 +385,9 @@ export async function GET(req: Request) {
         totalClosed,
         avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
         avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
-        slaRate:         summaryRow.slaRate,
-        slaMetCount:     totalSlaMet,
-        slaTotalCount:   totalSlaTotal,
+        slaRate:        summaryRow.slaRate,
+        slaMetCount:    totalSlaMet,
+        slaTotalCount:  totalSlaTotal,
         top3,
       },
       periodDays,
