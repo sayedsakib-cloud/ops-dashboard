@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentRow = {
   name: string;
-  assigned: number; repliedTo: number; repliesSent: number; closed: number;
+  assigned: number; repliedTo: number; closed: number;
   avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
   repliedPerHour: string; closedPerHour: string;
   slaMet: number; slaTotal: number; slaRate: number;
@@ -265,7 +265,6 @@ export default function TradingEthicsTab() {
                   "Teammate",
                   "Conversations Assigned",
                   "Conversations Replied To",
-                  "Replies Sent",
                   { label: "Closed Conversations", tip: TIP_CLOSED },
                 ]} />
                 <tbody>
@@ -273,7 +272,6 @@ export default function TradingEthicsTab() {
                     <td className="px-4 py-3 text-sm">Summary</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.assigned.toLocaleString()}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.repliedTo.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliesSent.toLocaleString()}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.closed.toLocaleString()}</td>
                   </tr>
                   {data!.agents.map((row, i) => (
@@ -286,7 +284,6 @@ export default function TradingEthicsTab() {
                       </td>
                       <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.assigned}</td>
                       <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.repliedTo}</td>
-                      <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.repliesSent}</td>
                       <td className="px-4 py-3 text-center">
                         <span className="font-bold text-gray-900">{row.closed}</span>
                       </td>
