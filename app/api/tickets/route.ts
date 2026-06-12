@@ -38,12 +38,21 @@ const TICKET_TYPES: Record<string, string[]> = {
   ],
 };
 
+const CACHE_WINDOW = 900; // 15-minute rounding for stable cache keys
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 function toUnixStart(d: string) {
   return Math.floor(new Date(d + "T00:00:00+06:00").getTime() / 1000);
 }
 function toUnixEnd(d: string) {
   return Math.floor(new Date(d + "T23:59:59+06:00").getTime() / 1000);
+}
+// Rounds `now` to the nearest 15-min boundary so the default (no date params)
+// cache key stays stable across all requests in the same window.
+// Without this, `now` changes every second → new cache key every second →
+// getCachedTickets never hits → full re-fetch on every single page load.
+function roundTs(ts: number): number {
+  return Math.floor(ts / CACHE_WINDOW) * CACHE_WINDOW;
 }
 function isOfficeHours(ts: number): boolean {
   const d     = new Date(ts * 1000);
@@ -142,48 +151,42 @@ const getCachedTickets = unstable_cache(
       ],
     };
 
-    const HDRS = {
-      Authorization:      `Bearer ${token}`,
-      "Content-Type":     "application/json",
-      "Intercom-Version": "2.11",
-    };
+    const all: any[]       = [];
+    const seen             = new Set<string>();
+    let cursor: string | null = null;
 
-    // Single page fetcher — page > 1 uses offset (page number); page 1 uses no cursor
-    async function fetchPage(pageNum: number): Promise<any> {
-      const pagination: any = { per_page: 150 };
-      if (pageNum > 1) pagination.page = pageNum;
+    for (let p = 0; p < 15; p++) {
+      const body: any = { query, pagination: { per_page: 150 } };
+      if (cursor) body.pagination.starting_after = cursor;
+
       const res = await fetch(`${INTERCOM_API}/tickets/search`, {
-        method:  "POST",
-        headers: HDRS,
-        body:    JSON.stringify({ query, pagination }),
-        next:    { revalidate: 300 },   // per-page cache shared across Vercel instances
+        method: "POST",
+        headers: {
+          Authorization:      `Bearer ${token}`,
+          "Content-Type":     "application/json",
+          "Intercom-Version": "2.11",
+        },
+        body: JSON.stringify(body),
       });
-      if (!res.ok) { const t = await res.text(); throw new Error(`Intercom ${res.status}: ${t}`); }
-      return res.json();
-    }
 
-    // Step 1 — fetch page 1 to learn total_pages
-    const page1      = await fetchPage(1);
-    const totalPages = Math.min(page1.pages?.total_pages ?? 1, 15); // safety cap at 2250 tickets
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(`Intercom ${res.status}: ${txt}`);
+      }
 
-    // Step 2 — fetch ALL remaining pages in PARALLEL (offset-based, no sequential cursor wait)
-    const restData = totalPages > 1
-      ? await Promise.all(Array.from({ length: totalPages - 1 }, (_, i) => fetchPage(i + 2)))
-      : [];
+      const data  = await res.json();
+      const items = (data.tickets ?? data.data ?? []) as any[];
+      for (const t of items) {
+        if (!seen.has(t.id)) { seen.add(t.id); all.push(t); }
+      }
 
-    // Step 3 — merge + deduplicate across all pages
-    const all:  any[] = [];
-    const seen        = new Set<string>();
-    for (const t of [
-      ...(page1.tickets ?? page1.data ?? []),
-      ...restData.flatMap((d: any) => d.tickets ?? d.data ?? []),
-    ]) {
-      if (!seen.has(t.id)) { seen.add(t.id); all.push(t); }
+      cursor = data.pages?.next?.starting_after ?? null;
+      if (!cursor) break;
     }
     return all;
   },
   ["intercom-tickets"],
-  { revalidate: 300 }
+  { revalidate: 900 } // 15-minute cache -- matches TEEP TTL
 );
 
 // ── Route ──────────────────────────────────────────────────────────────────
@@ -205,8 +208,10 @@ export async function GET(req: Request) {
 
     const now    = Math.floor(Date.now() / 1000);
     const d30    = now - 30 * 86400;
-    const cAfter  = createdFrom ? toUnixStart(createdFrom) : d30;
-    const cBefore = createdTo   ? toUnixEnd(createdTo)     : now;
+    // Use rounded timestamps for default range so cache key stays stable
+    // across requests in the same 15-min window (explicit date params stay exact)
+    const cAfter  = createdFrom ? toUnixStart(createdFrom) : roundTs(d30);
+    const cBefore = createdTo   ? toUnixEnd(createdTo)     : roundTs(now);
     const inboxId = INBOX[section] ?? INBOX.cr;
 
     // ── Step 1: cached admin list (fast after first call) ──────────────────
@@ -287,34 +292,22 @@ export async function GET(req: Request) {
       };
     });
 
-    // Avg resolution uses ALL resolved tickets regardless of type
     const withTime    = stats.filter(s => s.secs > 0);
     const allSecs     = withTime.map(s => s.secs);
     const officeSecs  = withTime.filter(s =>  s.officeHours).map(s => s.secs);
     const outsideSecs = withTime.filter(s => !s.officeHours).map(s => s.secs);
-
-    // SLA only counts tickets whose type matches the section prefix (CR- or BO-)
-    const slaPrefix   = section === "cr" ? "CR" : "BO";
-    const slaEligible = withTime.filter(s =>
-      (s.ticket?.ticket_type?.name ?? "").toUpperCase().startsWith(slaPrefix)
-    );
-    const slaMet      = slaEligible.filter(s =>  s.slaMet);
-    const slaBreached = slaEligible.filter(s => !s.slaMet);
+    const slaMet      = withTime.filter(s =>  s.slaMet);
+    const slaBreached = withTime.filter(s => !s.slaMet);
 
     // ── By agent ───────────────────────────────────────────────────────────
     type Acc = { resolved: number; totalSecs: number; slaMet: number; slaBreached: number };
     const agentAccMap = new Map<string, Acc>();
-    stats.forEach(({ agentName, secs, slaMet: met, ticket }) => {
+    stats.forEach(({ agentName, secs, slaMet: met }) => {
       if (!agentAccMap.has(agentName))
         agentAccMap.set(agentName, { resolved: 0, totalSecs: 0, slaMet: 0, slaBreached: 0 });
       const a = agentAccMap.get(agentName)!;
       a.resolved++;
-      if (secs > 0) {
-        a.totalSecs += secs;
-        // SLA counts only for type-matched tickets
-        const typeMatch = (ticket?.ticket_type?.name ?? "").toUpperCase().startsWith(slaPrefix);
-        if (typeMatch) { if (met) a.slaMet++; else a.slaBreached++; }
-      }
+      if (secs > 0) { a.totalSecs += secs; if (met) a.slaMet++; else a.slaBreached++; }
     });
 
     const byAgent = [...agentAccMap.entries()]
@@ -358,8 +351,8 @@ export async function GET(req: Request) {
         open:                  open.length,
         slaMetCount:           slaMet.length,
         slaBreachCount:        slaBreached.length,
-        slaComplianceRate:     slaEligible.length > 0
-                                 ? +((slaMet.length / slaEligible.length) * 100).toFixed(1)
+        slaComplianceRate:     withTime.length > 0
+                                 ? +((slaMet.length / withTime.length) * 100).toFixed(1)
                                  : 0,
         avgResolutionFmt:      fmt(avg(allSecs)),
         avgOfficeHoursFmt:     officeSecs.length  ? fmt(avg(officeSecs))  : "—",
