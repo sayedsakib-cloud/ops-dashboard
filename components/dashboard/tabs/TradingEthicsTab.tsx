@@ -101,13 +101,11 @@ function TH({ cols }: { cols: ColDef[] }) {
 // ── Info tooltip ───────────────────────────────────────────────────────────
 function InfoTooltip({ text }: { text: string }) {
   return (
-    <span className="relative group inline-flex items-center cursor-help ml-0.5 align-middle">
-      <span className="w-3.5 h-3.5 rounded-full bg-gray-400 text-white text-[9px] flex items-center justify-center font-bold hover:bg-gray-500 transition-colors flex-shrink-0">
-        i
-      </span>
-      <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 w-60 bg-gray-900 text-white text-xs rounded-md px-2.5 py-2 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-50 leading-relaxed font-normal normal-case tracking-normal whitespace-normal shadow-xl">
-        {text}
-      </span>
+    <span
+      title={text}
+      className="inline-flex w-4 h-4 rounded-full bg-gray-400 text-white items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-gray-500 transition-colors flex-shrink-0 align-middle"
+    >
+      i
     </span>
   );
 }
