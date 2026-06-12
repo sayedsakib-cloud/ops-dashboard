@@ -347,7 +347,6 @@ export async function GET(req: Request) {
     }
 
     // ── Build rows ────────────────────────────────────────────────────────
-    const activeHours = periodDays * 8;
     type AgentRow = {
       name: string; assigned: number; repliedTo: number; repliesSent: number; closed: number;
       avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
@@ -366,8 +365,8 @@ export async function GET(req: Request) {
         avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
         avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
         avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
-        repliedPerHour: activeHours > 0  ? (a.repliedTo / activeHours).toFixed(1) : "--",
-        closedPerHour:  activeHours > 0  ? (a.closed    / activeHours).toFixed(1) : "--",
+        repliedPerHour: periodDays > 0  ? (a.repliedTo / periodDays).toFixed(1) : "--",
+        closedPerHour:  periodDays > 0  ? (a.closed    / periodDays).toFixed(1) : "--",
         slaMet:         a.slaMet,
         slaTotal:       a.slaTotal,
         slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
@@ -398,8 +397,8 @@ export async function GET(req: Request) {
       avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
       avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
-      repliedPerHour: activeHours > 0 ? (totalRepliedTo / activeHours).toFixed(1) : "--",
-      closedPerHour:  activeHours > 0 ? (totalClosed    / activeHours).toFixed(1) : "--",
+      repliedPerHour: periodDays > 0 ? (totalRepliedTo / periodDays).toFixed(1) : "--",
+      closedPerHour:  periodDays > 0 ? (totalClosed    / periodDays).toFixed(1) : "--",
       slaMet:         totalSlaMet,
       slaTotal:       totalSlaTotal,
       slaRate:        totalSlaTotal > 0 ? +((totalSlaMet / totalSlaTotal) * 100).toFixed(1) : 0,
