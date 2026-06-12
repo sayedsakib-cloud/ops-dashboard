@@ -24,7 +24,7 @@ type TeepData = {
   agents: AgentRow[];
 };
 
-// ── Avatar helper ──────────────────────────────────────────────────────────
+// ── Avatar ─────────────────────────────────────────────────────────────────
 const PALETTE = [
   "bg-indigo-500","bg-purple-500","bg-pink-500","bg-blue-500",
   "bg-teal-500","bg-emerald-500","bg-orange-500","bg-rose-500",
@@ -43,19 +43,41 @@ function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "xs" }) {
   );
 }
 
+// ── Info tooltip (native title attribute — Turbopack-safe) ─────────────────
+function Tip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      className="inline-flex w-4 h-4 rounded-full bg-gray-300 text-gray-600 items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-gray-400 transition-colors flex-shrink-0 align-middle"
+    >
+      i
+    </span>
+  );
+}
+
 // ── Summary card ───────────────────────────────────────────────────────────
-function SummaryCard({
-  label, value, sub, valueColor, tip, children,
+function Card({
+  label, tip, value, valueColor, sub, children,
 }: {
-  label: string; value?: string | number; sub?: string;
-  valueColor?: string; tip?: string; children?: React.ReactNode;
+  label: string;
+  tip?: string;
+  value?: string | number;
+  valueColor?: string;
+  sub?: string;
+  children?: React.ReactNode;
 }) {
   return (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
       <div className="flex items-center gap-0.5 mb-2">
         <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
-        {tip ? <InfoTooltip text={tip} /> : null}
+        {tip ? <Tip text={tip} /> : null}
       </div>
+      {value !== undefined ? (
+        <p className={`text-2xl font-bold ${valueColor ?? "text-gray-900"}`}>{value}</p>
+      ) : null}
+      {sub ? <p className="text-xs text-gray-400 mt-1">{sub}</p> : null}
+      {children}
+    </div>
   );
 }
 
@@ -73,24 +95,24 @@ function SlaBar({ rate }: { rate: number }) {
   );
 }
 
-// ── Table head row ─────────────────────────────────────────────────────────
-type ColDef = string | { label: string; tip: string };
+// ── Table header ───────────────────────────────────────────────────────────
+type ColSpec = { label: string; tip?: string };
 
-function TH({ cols }: { cols: ColDef[] }) {
+function TH({ cols }: { cols: Array<string | ColSpec> }) {
   return (
     <thead>
       <tr className="bg-gray-900 text-white">
-        {cols.map(c => {
-          const label = typeof c === "string" ? c : c.label;
-          const tip   = typeof c === "string" ? undefined : c.tip;
+        {cols.map(col => {
+          const lbl = typeof col === "string" ? col : col.label;
+          const tip = typeof col === "string" ? undefined : col.tip;
           return (
-            <th key={label} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
+            <th key={lbl} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
               {tip ? (
-                <span className="flex items-center gap-0.5">
-                  {label}
-                  <InfoTooltip text={tip} />
+                <span className="inline-flex items-center gap-1">
+                  {lbl}
+                  <Tip text={tip} />
                 </span>
-              ) : label}
+              ) : lbl}
             </th>
           );
         })}
@@ -98,20 +120,8 @@ function TH({ cols }: { cols: ColDef[] }) {
     </thead>
   );
 }
-// ── Info tooltip ───────────────────────────────────────────────────────────
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <span
-      title={text}
-      className="inline-flex w-4 h-4 rounded-full bg-gray-400 text-white items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-gray-500 transition-colors flex-shrink-0 align-middle"
-    >
-      i
-    </span>
-  );
-}
 
 // ── Main component ─────────────────────────────────────────────────────────
-
 export default function TradingEthicsTab() {
   const [data,    setData]    = useState<TeepData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -137,16 +147,21 @@ export default function TradingEthicsTab() {
 
   const s = data?.summary;
 
+  const TIP_CLOSED      = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured — typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
+  const TIP_FRT         = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only. May differ slightly from Intercom which uses agent-level assignment timestamps.";
+  const TIP_HANDLING    = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
+  const TIP_ATF         = "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to team (time_to_assignment near 0) rather than directly to the individual agent.";
+  const TIP_REPLIED_HR  = "Conversations replied to divided by period days times 8h. Intercom uses actual agent logged-in time as denominator (e.g. 12h 6m) which is not available via the public API.";
+  const TIP_CLOSED_HR   = "Conversations closed divided by period days times 8h. Intercom uses actual agent logged-in time as denominator which is not available via the public API.";
+
   return (
     <div className="space-y-5">
 
-      {/* Header + date filter */}
+      {/* Header */}
       <div className="bg-white rounded-lg shadow-sm px-6 py-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">Trading Ethics Email Performance</h1>
-          <p className="text-xs text-gray-400 mt-0.5">
-            Channel: Email - Team: All CR inboxes - Timezone: GMT+6
-          </p>
+          <p className="text-xs text-gray-400 mt-0.5">Channel: Email - Team: All CR inboxes - Timezone: GMT+6</p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div>
@@ -171,47 +186,42 @@ export default function TradingEthicsTab() {
       </div>
 
       {/* Loading */}
-      {loading && (
+      {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
             <div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-3" />
             <p className="text-gray-500 text-sm">Fetching email conversations from Intercom...</p>
-            <p className="text-gray-400 text-xs mt-1">
-              {data ? "Refreshing..." : "Defaults to last 7 days"}
-            </p>
           </div>
         </div>
-      )}
+      ) : null}
 
-      {error && (
+      {error ? (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
           <strong>Error:</strong> {error}
         </div>
-      )}
+      ) : null}
 
-      {!loading && s && (
+      {!loading && s ? (
         <div className="space-y-5">
 
-          {/* ── Summary cards ── */}
+          {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
 
-            {/* Emails Closed */}
-            <SummaryCard
+            <Card
               label="Emails Closed"
+              tip={TIP_CLOSED}
               value={s.totalClosed.toLocaleString()}
-              sub={`Last ${data!.periodDays} day${data!.periodDays > 1 ? "s" : ""}`}
-              tip="Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured. Typically ~10% lower than Intercom's 'Closed by teammates' metric due to public API limitations."
+              sub={"Last " + data!.periodDays + (data!.periodDays > 1 ? " days" : " day")}
             />
 
-            {/* Avg First Response Time */}
-            <SummaryCard
+            <Card
               label="Avg First Response Time"
+              tip={TIP_FRT}
               value={s.avgFrtFmt}
-              sub="Avg time to first human reply (excl. FIN AI)"
+              sub="Avg time to first human reply"
             />
 
-            {/* Top 3 Agents */}
-            <SummaryCard label="Top 3 Agents by Closed">
+            <Card label="Top 3 Agents by Closed">
               <div className="mt-1 space-y-1.5">
                 {s.top3.map((ag, i) => (
                   <div key={ag.name} className="flex items-center gap-2">
@@ -222,28 +232,22 @@ export default function TradingEthicsTab() {
                   </div>
                 ))}
               </div>
-            </SummaryCard>
+            </Card>
 
-            {/* SLA */}
-            <SummaryCard
-              label="SLA Compliance (24h)"
-              valueColor={s.slaRate >= 80 ? "text-green-600" : s.slaRate >= 60 ? "text-amber-600" : "text-red-600"}
-              sub={`${s.slaMetCount} met / ${s.slaTotalCount} total`}
-            >
+            <Card label="SLA Compliance (24H)">
               <p className={`text-2xl font-bold ${s.slaRate >= 80 ? "text-green-600" : s.slaRate >= 60 ? "text-amber-600" : "text-red-600"}`}>
                 {s.slaRate}%
               </p>
+              <p className="text-xs text-gray-400 mt-0.5">{s.slaMetCount} met / {s.slaTotalCount} total</p>
               <SlaBar rate={s.slaRate} />
-            </SummaryCard>
+            </Card>
           </div>
 
-          {/* ── Table 1: Volume & Activity ── */}
+          {/* Table 1 — Conversation Volume */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100">
               <p className="font-semibold text-gray-900 text-sm">Conversation Volume</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Assignment and reply activity per teammate
-              </p>
+              <p className="text-xs text-gray-400 mt-0.5">Assignment and reply activity per teammate</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -252,22 +256,16 @@ export default function TradingEthicsTab() {
                   "Conversations Assigned",
                   "Conversations Replied To",
                   "Replies Sent",
-                  { label: "Closed Conversations", tip: "Conversations closed in the period attributed via current assignment or teammates. ~10% below Intercom due to conversations closed without formal agent assignment (API limitation)." },
+                  { label: "Closed Conversations", tip: TIP_CLOSED },
                 ]} />
                 <tbody>
-                  {/* Summary row */}
-                  {(() => {
-                    const r = data!.summaryRow;
-                    return (
-                      <tr className="bg-gray-900 text-white font-semibold">
-                        <td className="px-4 py-3 text-sm">Summary</td>
-                        <td className="px-4 py-3 text-center">{r.assigned.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center">{r.repliedTo.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center">{r.repliesSent.toLocaleString()}</td>
-                        <td className="px-4 py-3 text-center">{r.closed.toLocaleString()}</td>
-                      </tr>
-                    );
-                  })()}
+                  <tr className="bg-gray-900 text-white font-semibold">
+                    <td className="px-4 py-3 text-sm">Summary</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.assigned.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliedTo.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliesSent.toLocaleString()}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.closed.toLocaleString()}</td>
+                  </tr>
                   {data!.agents.map((row, i) => (
                     <tr key={row.name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                       <td className="px-4 py-3">
@@ -289,39 +287,31 @@ export default function TradingEthicsTab() {
             </div>
           </div>
 
-          {/* ── Table 2: Timing & Efficiency ── */}
+          {/* Table 2 — Timing and Efficiency */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100">
               <p className="font-semibold text-gray-900 text-sm">Timing and Efficiency</p>
-              <p className="text-xs text-gray-400 mt-0.5">
-                Response times and per-active-hour rates (active hours = period days x 8h)
-              </p>
+              <p className="text-xs text-gray-400 mt-0.5">Response times and per-8h-day rates (hover column headers for accuracy notes)</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <TH cols={[
                   "Teammate",
-                  { label: "Avg First Response Time",          tip: "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only. May differ slightly from Intercom due to conversation-level vs agent-level statistics." },
-                  { label: "Avg Handling Time",                tip: "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent-specific assignment to close, which requires parts-level data not available via the public API." },
-                  { label: "Avg Assignment to 1st Response",   tip: "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to the team (time_to_assignment approaches 0) rather than directly to the agent." },
-                  { label: "Conv. Replied / 8h day",           tip: "Conversations replied to divided by (period days x 8h). Intercom uses actual agent logged-in time as the denominator (e.g. 12h 6m), which is not available via the public API." },
-                  { label: "Conv. Closed / 8h day",            tip: "Conversations closed divided by (period days x 8h). Intercom uses actual agent logged-in time as the denominator, which is not available via the public API." },
+                  { label: "Avg First Response Time",        tip: TIP_FRT },
+                  { label: "Avg Handling Time",              tip: TIP_HANDLING },
+                  { label: "Avg Assignment to 1st Response", tip: TIP_ATF },
+                  { label: "Conv. Replied / 8h day",         tip: TIP_REPLIED_HR },
+                  { label: "Conv. Closed / 8h day",          tip: TIP_CLOSED_HR },
                 ]} />
                 <tbody>
-                  {/* Summary row */}
-                  {(() => {
-                    const r = data!.summaryRow;
-                    return (
-                      <tr className="bg-gray-900 text-white font-semibold">
-                        <td className="px-4 py-3 text-sm">Summary</td>
-                        <td className="px-4 py-3 text-center">{r.avgFrtFmt}</td>
-                        <td className="px-4 py-3 text-center">{r.avgHandlingFmt}</td>
-                        <td className="px-4 py-3 text-center">{r.avgAtfFmt}</td>
-                        <td className="px-4 py-3 text-center">{r.repliedPerHour}</td>
-                        <td className="px-4 py-3 text-center">{r.closedPerHour}</td>
-                      </tr>
-                    );
-                  })()}
+                  <tr className="bg-gray-900 text-white font-semibold">
+                    <td className="px-4 py-3 text-sm">Summary</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgFrtFmt}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgHandlingFmt}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgAtfFmt}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliedPerHour}</td>
+                    <td className="px-4 py-3 text-center">{data!.summaryRow.closedPerHour}</td>
+                  </tr>
                   {data!.agents.map((row, i) => (
                     <tr key={row.name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
                       <td className="px-4 py-3">
@@ -331,9 +321,9 @@ export default function TradingEthicsTab() {
                             <div className="font-medium text-gray-900 text-sm">{row.name}</div>
                             <div className="flex items-center gap-1 mt-0.5">
                               <span className="text-xs text-gray-400">SLA</span>
-                              <span className={`text-xs font-semibold ${
-                                row.slaRate >= 80 ? "text-green-600" : row.slaRate >= 60 ? "text-amber-600" : "text-red-600"
-                              }`}>{row.slaTotal > 0 ? `${row.slaRate}%` : "--"}</span>
+                              <span className={`text-xs font-semibold ${row.slaRate >= 80 ? "text-green-600" : row.slaRate >= 60 ? "text-amber-600" : "text-red-600"}`}>
+                                {row.slaTotal > 0 ? row.slaRate + "%" : "--"}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -351,7 +341,7 @@ export default function TradingEthicsTab() {
           </div>
 
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
