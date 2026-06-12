@@ -241,12 +241,12 @@ export async function GET(req: Request) {
     // ── Per-agent accumulator ─────────────────────────────────────────────
     type Acc = {
       name: string;
-      assigned: number; repliedTo: number; repliesSent: number; closed: number;
+      assigned: number; repliedTo: number; closed: number;
       frtSum: number; frtN: number; handlingSum: number; handlingN: number;
       atfSum: number; atfN: number; slaMet: number; slaTotal: number;
     };
     function emptyAcc(name: string): Acc {
-      return { name, assigned:0,repliedTo:0,repliesSent:0,closed:0,
+      return { name, assigned:0,repliedTo:0,closed:0,
                frtSum:0,frtN:0,handlingSum:0,handlingN:0,atfSum:0,atfN:0,slaMet:0,slaTotal:0 };
     }
     const agentMap = new Map<string, Acc>();
@@ -265,7 +265,7 @@ export async function GET(req: Request) {
       const adminReply  = stats.time_to_admin_reply      ?? 0;
       const handling    = stats.time_to_first_close      ?? 0;
       const assignment  = stats.time_to_assignment       ?? 0;
-      const parts       = stats.count_conversation_parts ?? 0;
+      //const parts       = stats.count_conversation_parts ?? 0;
       const lastCloseAt = stats.last_close_at ?? 0;
 
       // Assigned (formal assignment only)
@@ -284,7 +284,7 @@ export async function GET(req: Request) {
         const acc = agentMap.get(rid)!;
         if (adminReply > 0) {
           acc.repliedTo++;
-          acc.repliesSent += Math.max(1, Math.floor(parts / (replierIds.length || 1) / 2));
+          //acc.repliesSent += Math.max(1, Math.floor(parts / (replierIds.length || 1) / 2));
           acc.slaTotal++;
           if (adminReply <= SLA_SECS) acc.slaMet++;
         }
@@ -361,7 +361,7 @@ export async function GET(req: Request) {
 
     // ── Build rows ────────────────────────────────────────────────────────
     type AgentRow = {
-      name: string; assigned: number; repliedTo: number; repliesSent: number; closed: number;
+      name: string; assigned: number; repliedTo: number; closed: number;
       avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
       repliedPerHour: string; closedPerHour: string;
       slaMet: number; slaTotal: number; slaRate: number;
@@ -373,7 +373,7 @@ export async function GET(req: Request) {
         name:           a.name,
         assigned:       a.assigned,
         repliedTo:      a.repliedTo,
-        repliesSent:    a.repliesSent,
+        //repliesSent:    a.repliesSent,
         closed:         a.closed,
         avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
         avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
@@ -389,7 +389,7 @@ export async function GET(req: Request) {
     // ── Summary ───────────────────────────────────────────────────────────
     const totalAssigned    = rows.reduce((s, r) => s + r.assigned,    0);
     const totalRepliedTo   = rows.reduce((s, r) => s + r.repliedTo,   0);
-    const totalRepliesSent = rows.reduce((s, r) => s + r.repliesSent, 0);
+    //const totalRepliesSent = rows.reduce((s, r) => s + r.repliesSent, 0);
     const totalClosed      = rows.reduce((s, r) => s + r.closed,      0);
     const totalSlaMet      = rows.reduce((s, r) => s + r.slaMet,      0);
     const totalSlaTotal    = rows.reduce((s, r) => s + r.slaTotal,    0);
@@ -405,7 +405,7 @@ export async function GET(req: Request) {
       name:           "Summary",
       assigned:       totalAssigned,
       repliedTo:      totalRepliedTo,
-      repliesSent:    totalRepliesSent,
+      //repliesSent:    totalRepliesSent,
       closed:         totalClosed,
       avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
