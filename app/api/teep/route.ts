@@ -181,6 +181,19 @@ export async function GET(req: Request) {
     const uBefore = endDate   ? toUnixEnd(endDate)     : now;
     const periodDays = Math.max(1, Math.round((uBefore - uAfter) / 86400));
 
+    // Count Mon-Fri days only in the selected range
+    let workingDays = 0;
+    const _wdCur = new Date(uAfter * 1000);
+    const _wdEnd = new Date(uBefore * 1000);
+    _wdCur.setHours(0, 0, 0, 0);
+    _wdEnd.setHours(23, 59, 59, 999);
+    while (_wdCur <= _wdEnd) {
+      const _d = _wdCur.getDay();
+      if (_d !== 0 && _d !== 6) workingDays++;
+      _wdCur.setDate(_wdCur.getDate() + 1);
+    }
+    workingDays = Math.max(1, workingDays);
+
     const [crTeams, { admins }] = await Promise.all([getCRTeams(), getAdmins()]);
 
     if (!crTeams.length)
@@ -365,8 +378,8 @@ export async function GET(req: Request) {
         avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
         avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
         avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
-        repliedPerHour: periodDays > 0  ? (a.repliedTo / periodDays).toFixed(1) : "--",
-        closedPerHour:  periodDays > 0  ? (a.closed    / periodDays).toFixed(1) : "--",
+        repliedPerHour: workingDays > 0  ? (a.repliedTo / workingDays).toFixed(1) : "--",
+        closedPerHour:  workingDays > 0  ? (a.closed    / workingDays).toFixed(1) : "--",
         slaMet:         a.slaMet,
         slaTotal:       a.slaTotal,
         slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
@@ -397,8 +410,8 @@ export async function GET(req: Request) {
       avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
       avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
-      repliedPerHour: periodDays > 0 ? (totalRepliedTo / periodDays).toFixed(1) : "--",
-      closedPerHour:  periodDays > 0 ? (totalClosed    / periodDays).toFixed(1) : "--",
+      repliedPerHour: workingDays > 0 ? (totalRepliedTo / workingDays).toFixed(1) : "--",
+      closedPerHour:  workingDays > 0 ? (totalClosed    / workingDays).toFixed(1) : "--",
       slaMet:         totalSlaMet,
       slaTotal:       totalSlaTotal,
       slaRate:        totalSlaTotal > 0 ? +((totalSlaMet / totalSlaTotal) * 100).toFixed(1) : 0,
