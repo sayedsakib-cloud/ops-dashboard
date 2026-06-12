@@ -48,7 +48,7 @@ function Tip({ text }: { text: string }) {
   return (
     <span
       title={text}
-      className="inline-flex w-4 h-4 rounded-full bg-gray-300 text-gray-600 items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-gray-400 transition-colors flex-shrink-0 align-middle"
+      className="inline-flex w-4 h-4 rounded-full bg-blue-500 text-white items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-blue-600 transition-colors flex-shrink-0 align-middle"
     >
       i
     </span>
@@ -150,9 +150,9 @@ export default function TradingEthicsTab() {
   const TIP_CLOSED      = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured — typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
   const TIP_FRT         = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only. May differ slightly from Intercom which uses agent-level assignment timestamps.";
   const TIP_HANDLING    = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
-  const TIP_ATF         = "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to team (time_to_assignment near 0) rather than directly to the individual agent.";
-  const TIP_REPLIED_HR  = "Conversations replied to divided by period days times 8h. Intercom uses actual agent logged-in time as denominator (e.g. 12h 6m) which is not available via the public API.";
-  const TIP_CLOSED_HR   = "Conversations closed divided by period days times 8h. Intercom uses actual agent logged-in time as denominator which is not available via the public API.";
+  //const TIP_ATF         = "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to team (time_to_assignment near 0) rather than directly to the individual agent.";
+  const TIP_REPLIED_HR  = "Avg conversations replied to per day (repliedTo / period days). NOT the same as Intercom's Conv. Replied / Active Hr, which divides by actual Active-status hours logged in Intercom — a much smaller number that measures intensity per online hour.";
+  const TIP_CLOSED_HR   = "Avg conversations closed per day (closed / period days). NOT the same as Intercom's Conv. Closed / Active Hr, which divides by actual Active-status hours logged in Intercom — a much smaller number that measures intensity per online hour.";
 
   return (
     <div className="space-y-5">
@@ -243,6 +243,16 @@ export default function TradingEthicsTab() {
             </Card>
           </div>
 
+          {/* Disclaimer banner */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex gap-3">
+            <span className="text-amber-500 text-lg flex-shrink-0 mt-0.5">!</span>
+            <div className="text-xs text-amber-800 leading-relaxed space-y-1">
+              <p><strong>Why is Emails Closed lower than the Intercom report?</strong> Our count uses the current conversation owner to assign credit. About 7-10% of closures are missed because some agents close conversations without formally claiming them. Intercom tracks every close action at a deeper level we cannot access via the public API.</p>
+              <p><strong>Why do Avg FRT and Avg ATF show the same number?</strong> Both are calculated from when the conversation was created. Intercom calculates ATF from the exact moment the agent received the task — that data is internal to Intercom and not in our API response.</p>
+              <p><strong>Replied / Day (avg) and Closed / Day (avg)</strong> show how many conversations each agent handled per calendar day on average. Intercom's equivalent columns (Conv. Replied / Active Hr and Conv. Closed / Active Hr) divide by hours the agent was in Active status in Intercom — typically much less than a full day. These are different metrics and the numbers will not match.</p>
+            </div>
+          </div>
+
           {/* Table 1 — Conversation Volume */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100">
@@ -299,16 +309,15 @@ export default function TradingEthicsTab() {
                   "Teammate",
                   { label: "Avg First Response Time",        tip: TIP_FRT },
                   { label: "Avg Handling Time",              tip: TIP_HANDLING },
-                  { label: "Avg Assignment to 1st Response", tip: TIP_ATF },
-                  { label: "Conv. Replied / 8h day",         tip: TIP_REPLIED_HR },
-                  { label: "Conv. Closed / 8h day",          tip: TIP_CLOSED_HR },
+                  //{ label: "Avg Assignment to 1st Response", tip: TIP_ATF },
+                  { label: "Replied / Day (avg)",  tip: TIP_REPLIED_HR },
+                  { label: "Closed / Day (avg)",   tip: TIP_CLOSED_HR },
                 ]} />
                 <tbody>
                   <tr className="bg-gray-900 text-white font-semibold">
                     <td className="px-4 py-3 text-sm">Summary</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.avgFrtFmt}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.avgHandlingFmt}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgAtfFmt}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.repliedPerHour}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.closedPerHour}</td>
                   </tr>
@@ -330,7 +339,6 @@ export default function TradingEthicsTab() {
                       </td>
                       <td className="px-4 py-3 text-center text-gray-700">{row.avgFrtFmt}</td>
                       <td className="px-4 py-3 text-center text-gray-700">{row.avgHandlingFmt}</td>
-                      <td className="px-4 py-3 text-center text-gray-700">{row.avgAtfFmt}</td>
                       <td className="px-4 py-3 text-center font-medium text-gray-900">{row.repliedPerHour}</td>
                       <td className="px-4 py-3 text-center font-medium text-gray-900">{row.closedPerHour}</td>
                     </tr>
