@@ -207,10 +207,10 @@ export async function GET(req: Request) {
       throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
     const now    = Math.floor(Date.now() / 1000);
-    const d30    = now - 30 * 86400;
+    const d7     = now - 7 * 86400;
     // Use rounded timestamps for default range so cache key stays stable
     // across requests in the same 15-min window (explicit date params stay exact)
-    const cAfter  = createdFrom ? toUnixStart(createdFrom) : roundTs(d30);
+    const cAfter  = createdFrom ? toUnixStart(createdFrom) : roundTs(d7);
     const cBefore = createdTo   ? toUnixEnd(createdTo)     : roundTs(now);
     const inboxId = INBOX[section] ?? INBOX.cr;
 
