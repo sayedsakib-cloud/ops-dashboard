@@ -38,6 +38,5 @@ export async function GET(req: Request) {
       }
     })
   );
-
   return NextResponse.json({ warmed: results, at: new Date().toISOString() });
 }
