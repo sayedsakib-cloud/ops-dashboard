@@ -45,13 +45,13 @@ input[type="date"]:focus {
    ═══════════════════════════════════════════════════════════════════ */
 
 /* ── Card & surface backgrounds ──────────────────────────────────── */
-/*.ops-dark .bg-white                { background-color: #152033 !important; }
+.ops-dark .bg-white                { background-color: #152033 !important; }
 .ops-dark .bg-gray-50              { background-color: #0e1828 !important; }
 .ops-dark .bg-gray-50\/60          { background-color: rgba(14,24,40,0.7) !important; }
 .ops-dark .bg-gray-100             { background-color: #0b1522 !important; }
 
 /* was: .ops-dark .bg-white { background-color: #152033 !important; } */
-.ops-dark .bg-white {
+/*.ops-dark .bg-white {
   background-color: rgba(21, 32, 51, 0.55) !important;
   backdrop-filter: blur(14px) saturate(130%);
   -webkit-backdrop-filter: blur(14px) saturate(130%);
