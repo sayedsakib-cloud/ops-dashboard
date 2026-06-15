@@ -42,6 +42,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
         backdropFilter:       "blur(10px)",
         WebkitBackdropFilter: "blur(10px)",
         borderColor:          "rgba(148,163,184,0.10)",
+        zIndex:               30,
       }}
     >
       {/* ── Logo / Branding ──────────────────────────────────── */}
