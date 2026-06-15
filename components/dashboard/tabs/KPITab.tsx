@@ -215,9 +215,17 @@ function BAUSection() {
     );
     if (!data) return null;
 
+    // Find name/agent column for by-name summary
+    const nameIdx = data.headers.findIndex(h =>
+      h.toLowerCase().includes("name") || h.toLowerCase().includes("agent")
+    );
     // Value column = the count column (Final Count / Initial Email Count).
     // The API always returns it as the last column.
     const valueIdx = data.headers.findIndex(h => /count/i.test(h));
+
+    // Value column = the count column (Final Count / Initial Email Count).
+    // The API always returns it as the last column.
+    //const valueIdx = data.headers.findIndex(h => /count/i.test(h));
     const vIdx = valueIdx >= 0 ? valueIdx : data.headers.length - 1;
     const numOf = (v: string) => {
       const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
