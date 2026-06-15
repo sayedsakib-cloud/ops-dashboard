@@ -70,7 +70,7 @@ export default function DashboardPage() {
 
           <div
             className="flex-1 overflow-y-auto ops-dark px-6 py-5"
-            style={{ background: "#0a1628" }}
+            style={{ background: "radial-gradient(1100px 520px at 18% -5%, #16284a 0%, #0b1a30 55%, #081120 100%)" }}
           >
             <div style={vis("daily-huddle")}>
               {mounted["daily-huddle"] ? <DailyHuddleTab /> : null}
