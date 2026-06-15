@@ -59,7 +59,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
 
         {!collapsed ? (
           <span
-            className="font-semibold text-sm whitespace-nowrap"
+            className="font-bold text-xl whitespace-nowrap"
             style={{ color: "#e2e8f0" }}
           >
             Ops Metrics
