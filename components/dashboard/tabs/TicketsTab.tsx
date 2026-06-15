@@ -229,7 +229,7 @@ export default function TicketsTab() {
         </div>
         <p className="text-xs text-gray-400 mt-2">
           {cur.dateMode === "created"
-            ? "Filtering by ticket creation date · defaults to last 30 days"
+            ? "Filtering by ticket creation date · defaults to last 7 days"
             : "Filtering by resolved date · returns tickets closed in the selected range"}
         </p>
       </div>
