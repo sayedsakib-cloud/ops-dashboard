@@ -215,18 +215,23 @@ function BAUSection() {
     );
     if (!data) return null;
 
-    // Find name/agent column for by-name summary
-    const nameIdx = data.headers.findIndex(h =>
-      h.toLowerCase().includes("name") || h.toLowerCase().includes("agent")
-    );
+    // Value column = the count column (Final Count / Initial Email Count).
+    // The API always returns it as the last column.
+    const valueIdx = data.headers.findIndex(h => /count/i.test(h));
+    const vIdx = valueIdx >= 0 ? valueIdx : data.headers.length - 1;
+    const numOf = (v: string) => {
+      const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
+      return isNaN(n) ? 0 : n;
+    };
     const byName = new Map<string, number>();
     if (nameIdx >= 0) {
       data.rows.forEach(row => {
         const n = row[nameIdx] || "Unknown";
-        byName.set(n, (byName.get(n) || 0) + 1);
+        byName.set(n, (byName.get(n) || 0) + numOf(row[vIdx]));
       });
     }
     const nameSummary = [...byName.entries()].sort((a, b) => b[1] - a[1]);
+    const grandTotal = data.rows.reduce((acc, row) => acc + numOf(row[vIdx]), 0);
 
     const totalPages = Math.ceil(data.rows.length / PAGE_SIZE);
     const pagedRows  = data.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -237,7 +242,7 @@ function BAUSection() {
         {/* Total count card */}
         <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100 inline-block min-w-[220px]">
           <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{totalLabel}</p>
-          <p className="text-3xl font-bold text-gray-900">{data.filtered.toLocaleString()}</p>
+          <p className="text-3xl font-bold text-gray-900">{grandTotal.toLocaleString()}</p>
         </div>
 
         {/* By-name summary table */}
