@@ -1,11 +1,10 @@
 "use client";
-import { useState } from "react";
-import useSWR from "swr";
+import { useEffect, useState } from "react";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentRow = {
   name: string;
-  assigned: number; repliedTo: number; repliesSent: number; closed: number;
+  assigned: number; repliedTo: number; closed: number;
   avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
   repliedPerHour: string; closedPerHour: string;
   slaMet: number; slaTotal: number; slaRate: number;
@@ -44,28 +43,24 @@ function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "xs" }) {
   );
 }
 
-// ── Info tooltip (native title attribute — Turbopack-safe) ─────────────────
+// ── Info tooltip ────────────────────────────────────────────────────────────
 function Tip({ text }: { text: string }) {
   return (
     <span
       title={text}
-      className="inline-flex w-4 h-4 rounded-full bg-gray-300 text-gray-600 items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-gray-400 transition-colors flex-shrink-0 align-middle"
+      className="inline-flex w-4 h-4 rounded-full bg-blue-500 text-white items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-blue-600 transition-colors flex-shrink-0 align-middle"
     >
       i
     </span>
   );
 }
 
-// ── Summary card ───────────────────────────────────────────────────────────
+// ── Summary card ────────────────────────────────────────────────────────────
 function Card({
   label, tip, value, valueColor, sub, children,
 }: {
-  label: string;
-  tip?: string;
-  value?: string | number;
-  valueColor?: string;
-  sub?: string;
-  children?: React.ReactNode;
+  label: string; tip?: string; value?: string | number;
+  valueColor?: string; sub?: string; children?: React.ReactNode;
 }) {
   return (
     <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
@@ -82,7 +77,7 @@ function Card({
   );
 }
 
-// ── SLA bar ────────────────────────────────────────────────────────────────
+// ── SLA bar ─────────────────────────────────────────────────────────────────
 function SlaBar({ rate }: { rate: number }) {
   const color = rate >= 80 ? "bg-green-500" : rate >= 60 ? "bg-amber-400" : "bg-red-500";
   const text  = rate >= 80 ? "text-green-600" : rate >= 60 ? "text-amber-600" : "text-red-600";
@@ -96,9 +91,8 @@ function SlaBar({ rate }: { rate: number }) {
   );
 }
 
-// ── Table header ───────────────────────────────────────────────────────────
+// ── Table header ────────────────────────────────────────────────────────────
 type ColSpec = { label: string; tip?: string };
-
 function TH({ cols }: { cols: Array<string | ColSpec> }) {
   return (
     <thead>
@@ -122,55 +116,37 @@ function TH({ cols }: { cols: Array<string | ColSpec> }) {
   );
 }
 
-// SWR fetcher — throws on non-ok so SWR populates error state
-const swrFetch = async (url: string) => {
-  const res  = await fetch(url);
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "Failed");
-  return json as TeepData;
-};
-
-// ── Main component ─────────────────────────────────────────────────────────
+// ── Main component ──────────────────────────────────────────────────────────
 export default function TradingEthicsTab() {
-  // "draft" values in the inputs — only committed to activeFrom/activeTo on Apply
-  const [from,       setFrom]       = useState("");
-  const [to,         setTo]         = useState("");
-  const [activeFrom, setActiveFrom] = useState("");
-  const [activeTo,   setActiveTo]   = useState("");
+  const [data,    setData]    = useState<TeepData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error,   setError]   = useState<string | null>(null);
+  const [from,    setFrom]    = useState("");
+  const [to,      setTo]      = useState("");
 
-  // SWR key changes when active dates change → auto-refetch
-  // Stays the same across tab-switches → instant from browser memory cache
-  const p = new URLSearchParams();
-  if (activeFrom) p.set("startDate", activeFrom);
-  if (activeTo)   p.set("endDate",   activeTo);
-  const swrKey = "/api/teep" + (p.toString() ? "?" + p.toString() : "");
-
-  const { data, error, isLoading, isValidating } = useSWR<TeepData>(swrKey, swrFetch, {
-    revalidateOnFocus:     false,   // don't refetch when window regains focus
-    revalidateOnReconnect: false,
-    dedupingInterval:      900_000, // 15-min browser cache — matches server TTL
-    keepPreviousData:      true,    // show old data while loading new filter result
-  });
-
-  const loading = isLoading || isValidating;
-
-  function handleApply() {
-    setActiveFrom(from);
-    setActiveTo(to);
+  async function load(start?: string, end?: string) {
+    setLoading(true); setError(null);
+    try {
+      const p = new URLSearchParams();
+      if (start) p.set("startDate", start);
+      if (end)   p.set("endDate",   end);
+      const res  = await fetch("/api/teep" + (p.toString() ? "?" + p.toString() : ""));
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed");
+      setData(json);
+    } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
+    finally { setLoading(false); }
   }
-  function handleReset() {
-    setFrom(""); setTo("");
-    setActiveFrom(""); setActiveTo("");
-  }
+
+  useEffect(() => { load(); }, []);
 
   const s = data?.summary;
 
-  const TIP_CLOSED      = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured — typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
-  const TIP_FRT         = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only. May differ slightly from Intercom which uses agent-level assignment timestamps.";
-  const TIP_HANDLING    = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
-  const TIP_ATF         = "time_to_admin_reply minus time_to_assignment. May be inaccurate if conversations are auto-assigned to team (time_to_assignment near 0) rather than directly to the individual agent.";
-  const TIP_REPLIED_HR  = "Conversations replied to divided by period days times 8h. Intercom uses actual agent logged-in time as denominator (e.g. 12h 6m) which is not available via the public API.";
-  const TIP_CLOSED_HR   = "Conversations closed divided by period days times 8h. Intercom uses actual agent logged-in time as denominator which is not available via the public API.";
+  const TIP_CLOSED     = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured — typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
+  const TIP_FRT        = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only.";
+  const TIP_HANDLING   = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
+  const TIP_REPLIED_HR = "Conversations replied to divided by number of working days (Mon-Fri) in the period. NOT the same as Intercom's Conv. Replied / Active Hr which uses actual logged-in status time.";
+  const TIP_CLOSED_HR  = "Conversations closed divided by number of working days (Mon-Fri) in the period. NOT the same as Intercom's Conv. Closed / Active Hr which uses actual logged-in status time.";
 
   return (
     <div className="space-y-5">
@@ -192,11 +168,11 @@ export default function TradingEthicsTab() {
             <input type="date" value={to} onChange={e => setTo(e.target.value)}
               className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
           </div>
-          <button onClick={handleApply} disabled={loading}
+          <button onClick={() => load(from, to)} disabled={loading}
             className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-60 transition-colors">
             {loading ? "Loading..." : "Apply"}
           </button>
-          <button onClick={handleReset} disabled={loading}
+          <button onClick={() => { setFrom(""); setTo(""); load(); }} disabled={loading}
             className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 disabled:opacity-60 transition-colors">
             Reset
           </button>
@@ -224,21 +200,11 @@ export default function TradingEthicsTab() {
 
           {/* Summary cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-
-            <Card
-              label="Emails Closed"
-              tip={TIP_CLOSED}
+            <Card label="Emails Closed" tip={TIP_CLOSED}
               value={s.totalClosed.toLocaleString()}
-              sub={"Last " + data!.periodDays + (data!.periodDays > 1 ? " days" : " day")}
-            />
-
-            <Card
-              label="Avg First Response Time"
-              tip={TIP_FRT}
-              value={s.avgFrtFmt}
-              sub="Avg time to first human reply"
-            />
-
+              sub={"Last " + data!.periodDays + (data!.periodDays > 1 ? " days" : " day")} />
+            <Card label="Avg First Response Time" tip={TIP_FRT}
+              value={s.avgFrtFmt} sub="Avg time to first human reply" />
             <Card label="Top 3 Agents by Closed">
               <div className="mt-1 space-y-1.5">
                 {s.top3.map((ag, i) => (
@@ -251,7 +217,6 @@ export default function TradingEthicsTab() {
                 ))}
               </div>
             </Card>
-
             <Card label="SLA Compliance (24H)">
               <p className={`text-2xl font-bold ${s.slaRate >= 80 ? "text-green-600" : s.slaRate >= 60 ? "text-amber-600" : "text-red-600"}`}>
                 {s.slaRate}%
@@ -259,6 +224,15 @@ export default function TradingEthicsTab() {
               <p className="text-xs text-gray-400 mt-0.5">{s.slaMetCount} met / {s.slaTotalCount} total</p>
               <SlaBar rate={s.slaRate} />
             </Card>
+          </div>
+
+          {/* Disclaimer banner */}
+          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex gap-3">
+            <span className="text-amber-500 text-lg flex-shrink-0 mt-0.5">!</span>
+            <div className="text-xs text-amber-800 leading-relaxed space-y-1">
+              <p><strong>Why is Emails Closed lower than the Intercom report?</strong> Our count uses the current conversation owner to assign credit. About 7-10% of closures are missed because some agents close conversations without formally claiming them. Intercom tracks every close action at a deeper level not accessible via the public API.</p>
+              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours — a much smaller number. These are different metrics and will not match.</p>
+            </div>
           </div>
 
           {/* Table 1 — Conversation Volume */}
@@ -273,7 +247,6 @@ export default function TradingEthicsTab() {
                   "Teammate",
                   "Conversations Assigned",
                   "Conversations Replied To",
-                  "Replies Sent",
                   { label: "Closed Conversations", tip: TIP_CLOSED },
                 ]} />
                 <tbody>
@@ -281,7 +254,6 @@ export default function TradingEthicsTab() {
                     <td className="px-4 py-3 text-sm">Summary</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.assigned.toLocaleString()}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.repliedTo.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliesSent.toLocaleString()}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.closed.toLocaleString()}</td>
                   </tr>
                   {data!.agents.map((row, i) => (
@@ -294,10 +266,7 @@ export default function TradingEthicsTab() {
                       </td>
                       <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.assigned}</td>
                       <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.repliedTo}</td>
-                      <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.repliesSent}</td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="font-bold text-gray-900">{row.closed}</span>
-                      </td>
+                      <td className="px-4 py-3 text-center font-bold text-gray-900">{row.closed}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -309,24 +278,22 @@ export default function TradingEthicsTab() {
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-100">
               <p className="font-semibold text-gray-900 text-sm">Timing and Efficiency</p>
-              <p className="text-xs text-gray-400 mt-0.5">Response times and per-8h-day rates (hover column headers for accuracy notes)</p>
+              <p className="text-xs text-gray-400 mt-0.5">Hover the blue i icons on column headers to understand accuracy limitations vs Intercom</p>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <TH cols={[
                   "Teammate",
-                  { label: "Avg First Response Time",        tip: TIP_FRT },
-                  { label: "Avg Handling Time",              tip: TIP_HANDLING },
-                  { label: "Avg Assignment to 1st Response", tip: TIP_ATF },
-                  { label: "Conv. Replied / 8h day",         tip: TIP_REPLIED_HR },
-                  { label: "Conv. Closed / 8h day",          tip: TIP_CLOSED_HR },
+                  { label: "Avg First Response Time", tip: TIP_FRT },
+                  { label: "Avg Handling Time",       tip: TIP_HANDLING },
+                  { label: "Replied / Day (avg)",     tip: TIP_REPLIED_HR },
+                  { label: "Closed / Day (avg)",      tip: TIP_CLOSED_HR },
                 ]} />
                 <tbody>
                   <tr className="bg-gray-900 text-white font-semibold">
                     <td className="px-4 py-3 text-sm">Summary</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.avgFrtFmt}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.avgHandlingFmt}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgAtfFmt}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.repliedPerHour}</td>
                     <td className="px-4 py-3 text-center">{data!.summaryRow.closedPerHour}</td>
                   </tr>
@@ -348,7 +315,6 @@ export default function TradingEthicsTab() {
                       </td>
                       <td className="px-4 py-3 text-center text-gray-700">{row.avgFrtFmt}</td>
                       <td className="px-4 py-3 text-center text-gray-700">{row.avgHandlingFmt}</td>
-                      <td className="px-4 py-3 text-center text-gray-700">{row.avgAtfFmt}</td>
                       <td className="px-4 py-3 text-center font-medium text-gray-900">{row.repliedPerHour}</td>
                       <td className="px-4 py-3 text-center font-medium text-gray-900">{row.closedPerHour}</td>
                     </tr>
