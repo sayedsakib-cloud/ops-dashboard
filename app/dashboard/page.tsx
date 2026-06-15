@@ -1,5 +1,6 @@
 "use client";
 import { useState }        from "react";
+import { useSession }      from "next-auth/react";
 import DailyHuddleTab      from "@/components/dashboard/tabs/DailyHuddleTab";
 import KPITab              from "@/components/dashboard/tabs/KPITab";
 import RegularTaskTab      from "@/components/dashboard/tabs/RegularTaskTab";
@@ -7,9 +8,6 @@ import TicketsTab          from "@/components/dashboard/tabs/TicketsTab";
 import TradingEthicsTab    from "@/components/dashboard/tabs/TradingEthicsTab";
 import Sidebar             from "@/components/dashboard/Sidebar";
 import DashboardLoader     from "@/components/dashboard/DashboardLoader";
-
-// Auth is handled by app/dashboard/layout.tsx (server-side).
-// By the time this page renders, the user is guaranteed to be logged in.
 
 const TAB_LABELS: Record<string, string> = {
   "daily-huddle":   "Daily Huddle",
@@ -20,6 +18,16 @@ const TAB_LABELS: Record<string, string> = {
 };
 
 export default function DashboardPage() {
+  // required: true means next-auth automatically redirects to sign-in
+  // if there is no session — no manual redirect logic needed,
+  // no server-side redirect chain, no loops.
+  const { status } = useSession({
+    required: true,
+    onUnauthenticated() {
+      // next-auth handles the redirect to /api/auth/signin automatically
+    },
+  });
+
   const [active,  setActive]  = useState("daily-huddle");
   const [mounted, setMounted] = useState<Record<string, boolean>>({
     "daily-huddle": true,
@@ -34,17 +42,28 @@ export default function DashboardPage() {
     display: active === id ? "block" : "none",
   });
 
+  // Show spinner while next-auth checks the session
+  if (status === "loading") {
+    return (
+      <div
+        className="flex h-screen items-center justify-center"
+        style={{ background: "#0a1628" }}
+      >
+        <div className="text-center">
+          <div className="inline-block w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin mb-3" />
+          <p className="text-slate-400 text-sm">Verifying session...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <DashboardLoader>
       <div className="flex h-screen overflow-hidden" style={{ background: "#0d1117" }}>
 
-        {/* Left sidebar with nav + user info + sign out */}
         <Sidebar active={active} onSwitch={switchTab} />
 
-        {/* Main content area */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-
-          {/* Top header — shows current tab name */}
           <div
             className="flex-shrink-0 flex items-center px-6 h-14 border-b"
             style={{ background: "#0e1623", borderColor: "#1a2540" }}
@@ -54,7 +73,6 @@ export default function DashboardPage() {
             </h1>
           </div>
 
-          {/* Scrollable tab content */}
           <div
             className="flex-1 overflow-y-auto ops-dark px-6 py-5"
             style={{ background: "#0a1628" }}
@@ -75,7 +93,6 @@ export default function DashboardPage() {
               {mounted["trading-ethics"] ? <TradingEthicsTab /> : null}
             </div>
           </div>
-
         </div>
       </div>
     </DashboardLoader>
