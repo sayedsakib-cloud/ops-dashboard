@@ -24,3 +24,15 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Dark date inputs across all tabs */
+input[type="date"] {
+  color-scheme: dark;
+  background-color: #1e2d47;
+  color: #e2e8f0;
+  border-color: #2a3d5e !important;
+}
+input[type="date"]:focus {
+  border-color: #6366f1 !important;
+  outline: none;
+}
