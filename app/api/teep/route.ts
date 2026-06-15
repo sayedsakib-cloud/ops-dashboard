@@ -125,7 +125,7 @@ async function fetchConvsAllTeams(
     "Intercom-Version": "2.11",
   };
   const BATCH_SIZE = 5;  // teams per OR clause -- safe below Intercom query depth limit
-  const PAGE_CAP   = 10; // 10 pages x 150 = 1,500 convs per batch, ample for 7 days
+  const PAGE_CAP   = 5;  // 5 pages x 150 = 750 convs per batch; ample for 7-day window
 
   // Split team IDs into groups of 5
   const batches: string[][] = [];
