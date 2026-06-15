@@ -58,8 +58,8 @@ export default function DashboardPage() {
             </h1>
           </div>
 
-          {/* Scrollable content — dark bg, tab components use white cards = premium card-on-dark look */}
-          <div className="flex-1 overflow-y-auto px-6 py-5" style={{ background: "#0a1628" }}>
+          {/* Scrollable content — dark theme via ops-dark CSS class */}
+          <div className="flex-1 overflow-y-auto ops-dark px-6 py-5" style={{ background: "#0a1628" }}>
             <div style={vis("daily-huddle")}>
               {mounted["daily-huddle"] ? <DailyHuddleTab /> : null}
             </div>
