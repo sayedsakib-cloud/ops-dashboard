@@ -37,83 +37,92 @@ input[type="date"]:focus {
   outline: none;
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   OPS METRICS — DARK PREMIUM THEME
+/* ===================================================================
+   OPS METRICS -- GLASS THEME (subtle frost, ambient glow, current mix)
    Applied via .ops-dark wrapper on the scrollable content div.
-   Transforms all white/light Tailwind classes into the deep navy
-   dark aesthetic matching the CX Insights premium dashboard style.
-   ═══════════════════════════════════════════════════════════════════ */
+   Glass is scoped to cards/panels; table rows stay crisp & solid.
+   =================================================================== */
 
-/* ── Card & surface backgrounds ──────────────────────────────────── */
-.ops-dark .bg-white                { background-color: #152033 !important; }
-.ops-dark .bg-gray-50              { background-color: #0e1828 !important; }
-.ops-dark .bg-gray-50\/60          { background-color: rgba(14,24,40,0.7) !important; }
-.ops-dark .bg-gray-100             { background-color: #0b1522 !important; }
-
-/* was: .ops-dark .bg-white { background-color: #152033 !important; } */
-/*.ops-dark .bg-white {
-  background-color: rgba(21, 32, 51, 0.55) !important;
-  backdrop-filter: blur(14px) saturate(130%);
-  -webkit-backdrop-filter: blur(14px) saturate(130%);
+/* -- Frosted glass card & surface backgrounds -- */
+.ops-dark .bg-white {
+  background-color: rgba(19, 28, 47, 0.72) !important;
+  backdrop-filter: blur(10px) saturate(118%);
+  -webkit-backdrop-filter: blur(10px) saturate(118%);
 }
+.ops-dark .bg-gray-50  { background-color: #0d1626 !important; }
+.ops-dark .bg-gray-100 { background-color: #0b1421 !important; }
 
-/* ── Borders ─────────────────────────────────────────────────────── */
+/* -- Carve table rows OUT of the glass (keeps data crisp & readable) -- */
+.ops-dark tr.bg-white {
+  background-color: rgba(255, 255, 255, 0.025) !important;
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+.ops-dark tr.bg-gray-50\/60 {
+  background-color: transparent !important;
+  backdrop-filter: none !important;
+}
+.ops-dark tr.bg-white:hover,
+.ops-dark tr.bg-gray-50\/60:hover { background-color: rgba(56, 189, 248, 0.06) !important; }
+
+/* -- Hairline glass borders -- */
 .ops-dark .border-gray-100,
 .ops-dark .border-gray-200,
-.ops-dark .border-gray-300         { border-color: #1c3050 !important; }
-.ops-dark .border-b                { border-bottom-color: #1c3050 !important; }
-.ops-dark .border-t                { border-top-color:    #1c3050 !important; }
-.ops-dark .divide-gray-100 > * + * { border-top-color: #1c3050 !important; }
+.ops-dark .border-gray-300 { border-color: rgba(148, 163, 184, 0.10) !important; }
+.ops-dark .border-b { border-bottom-color: rgba(148, 163, 184, 0.08) !important; }
+.ops-dark .border-t { border-top-color: rgba(148, 163, 184, 0.08) !important; }
+.ops-dark .divide-gray-100 > * + * { border-top-color: rgba(148, 163, 184, 0.08) !important; }
 
-/* ── Text ────────────────────────────────────────────────────────── */
-.ops-dark .text-gray-900  { color: #eaf2ff !important; }
-.ops-dark .text-gray-800  { color: #d0dff0 !important; }
-.ops-dark .text-gray-700  { color: #b0c8de !important; }
-.ops-dark .text-gray-600  { color: #7a9abf !important; }
-.ops-dark .text-gray-500  { color: #567599 !important; }
-.ops-dark .text-gray-400  { color: #364f66 !important; }
-
-/* ── Shadows — enhanced depth ────────────────────────────────────── */
+/* -- Depth + top highlight for glass cards -- */
 .ops-dark .shadow-sm {
-  box-shadow: 0 2px 10px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.04) !important;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
 }
 
-/* ── Rounded corners — more pronounced for CX Insights boxy feel ── */
-.ops-dark .rounded-lg  { border-radius: 14px !important; }
-.ops-dark .rounded-md  { border-radius:  9px !important; }
+/* -- Rounded corners -- */
+.ops-dark .rounded-lg { border-radius: 16px !important; }
+.ops-dark .rounded-md { border-radius: 10px !important; }
 
-/* ── Hover states ────────────────────────────────────────────────── */
+/* -- Text -- */
+.ops-dark .text-gray-900 { color: #eaf2ff !important; }
+.ops-dark .text-gray-800 { color: #d0dff0 !important; }
+.ops-dark .text-gray-700 { color: #b3cadf !important; }
+.ops-dark .text-gray-600 { color: #8aa6c4 !important; }
+.ops-dark .text-gray-500 { color: #6e8cab !important; }
+.ops-dark .text-gray-400 { color: #51708d !important; }
+
+/* -- Hover states (non-row) -- */
 .ops-dark .hover\:bg-gray-50:hover,
 .ops-dark .hover\:bg-gray-100:hover,
-.ops-dark .hover\:bg-gray-200:hover { background-color: #1a2e48 !important; }
+.ops-dark .hover\:bg-gray-200:hover { background-color: rgba(56, 189, 248, 0.08) !important; }
 
-/* ── Inputs, selects, textareas ──────────────────────────────────── */
+/* -- Inputs, selects, textareas -- */
 .ops-dark input[type="date"],
 .ops-dark input[type="text"],
 .ops-dark input[type="search"],
 .ops-dark select,
 .ops-dark textarea {
-  background-color: #0d1d30 !important;
-  color: #b0c8de !important;
-  border-color: #1c3050 !important;
+  background-color: rgba(8, 15, 28, 0.6) !important;
+  color: #cdddee !important;
+  border-color: rgba(148, 163, 184, 0.14) !important;
   color-scheme: dark;
 }
 .ops-dark input[type="date"]:focus,
 .ops-dark input[type="text"]:focus,
 .ops-dark select:focus {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 0 0 2px rgba(59,130,246,0.2) !important;
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2) !important;
   outline: none !important;
 }
-.ops-dark input[type="text"]::placeholder,
-.ops-dark input[type="search"]::placeholder { color: #364f66 !important; }
-.ops-dark select option { background-color: #152033; color: #eaf2ff; }
+.ops-dark input::placeholder { color: #51708d !important; }
+.ops-dark select option { background-color: #0d1626; color: #eaf2ff; }
 
-/* ── Progress bar tracks ─────────────────────────────────────────── */
+/* -- Progress bar tracks -- */
 .ops-dark .bg-gray-100.rounded-full,
-.ops-dark .bg-gray-100.h-1\.5 { background-color: #1a2e48 !important; }
+.ops-dark .bg-gray-100.h-1\.5 { background-color: rgba(255, 255, 255, 0.06) !important; }
 
-/* ── Badge backgrounds (keep colour intent, adjust for dark) ─────── */
+/* -- Badge backgrounds -- */
 .ops-dark .bg-green-100  { background-color: rgba(21,128,61,0.22) !important; }
 .ops-dark .bg-green-50   { background-color: rgba(21,128,61,0.12) !important; }
 .ops-dark .bg-red-100    { background-color: rgba(153,27,27,0.28) !important; }
@@ -124,46 +133,34 @@ input[type="date"]:focus {
 .ops-dark .bg-teal-100   { background-color: rgba(19,78,74,0.28) !important; }
 .ops-dark .bg-indigo-100 { background-color: rgba(55,48,163,0.28) !important; }
 
-/* ── Badge text ──────────────────────────────────────────────────── */
-.ops-dark .text-green-700,
-.ops-dark .text-green-800  { color: #4ade80 !important; }
-.ops-dark .text-red-700,
-.ops-dark .text-red-800    { color: #f87171 !important; }
-.ops-dark .text-amber-600,
-.ops-dark .text-amber-800  { color: #fbbf24 !important; }
+/* -- Badge / accent text (current cyan + violet + semantic mix) -- */
+.ops-dark .text-green-700, .ops-dark .text-green-800 { color: #4ade80 !important; }
+.ops-dark .text-red-700,   .ops-dark .text-red-800   { color: #f87171 !important; }
+.ops-dark .text-amber-600, .ops-dark .text-amber-800 { color: #fbbf24 !important; }
 .ops-dark .text-yellow-800 { color: #fde047 !important; }
 .ops-dark .text-lime-800   { color: #a3e635 !important; }
 .ops-dark .text-orange-800 { color: #fb923c !important; }
 .ops-dark .text-teal-800   { color: #2dd4bf !important; }
 .ops-dark .text-indigo-600 { color: #818cf8 !important; }
-
-/* Badge borders (for "No Issues" style) */
 .ops-dark .border-green-200 { border-color: rgba(21,128,61,0.4) !important; }
 
-/* ── Stat card number colors keep white ──────────────────────────── */
+/* -- Stat-card numbers stay white -- */
 .ops-dark .text-gray-900.text-2xl,
 .ops-dark .text-gray-900.text-3xl { color: #ffffff !important; }
 
-/* ── Scrollbar for dark content area ────────────────────────────── */
-.ops-dark::-webkit-scrollbar       { width: 5px; }
+/* -- Scrollbar -- */
+.ops-dark::-webkit-scrollbar { width: 6px; }
 .ops-dark::-webkit-scrollbar-track { background: transparent; }
-.ops-dark::-webkit-scrollbar-thumb { background: #1c3050; border-radius: 3px; }
-.ops-dark::-webkit-scrollbar-thumb:hover { background: #264468; }
+.ops-dark::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.18); border-radius: 3px; }
+.ops-dark::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.3); }
 
-/* ── Pagination buttons ──────────────────────────────────────────── */
-.ops-dark .border-gray-200.rounded  { border-color: #1c3050 !important; }
+/* -- Pagination -- */
+.ops-dark .border-gray-200.rounded { border-color: rgba(148,163,184,0.14) !important; }
 .ops-dark .disabled\:opacity-40:disabled { opacity: 0.25 !important; }
 
-/* ── Amber/warning banner (disclaimer) ──────────────────────────── */
-.ops-dark .bg-amber-50   { background-color: rgba(146,64,14,0.15) !important; }
+/* -- Amber / red banners (not glass -- solid tint) -- */
+.ops-dark .bg-amber-50    { background-color: rgba(146,64,14,0.15) !important; }
 .ops-dark .border-amber-200 { border-color: rgba(146,64,14,0.4) !important; }
-.ops-dark .text-amber-800 { color: #fbbf24 !important; }
 .ops-dark .text-amber-500 { color: #f59e0b !important; }
-
-/* ── Red error banner ────────────────────────────────────────────── */
-.ops-dark .bg-red-50     { background-color: rgba(153,27,27,0.15) !important; }
+.ops-dark .bg-red-50      { background-color: rgba(153,27,27,0.15) !important; }
 .ops-dark .border-red-200 { border-color: rgba(153,27,27,0.4) !important; }
-.ops-dark .text-red-700  { color: #f87171 !important; }
-
-/* ── Table header stays dark (already dark bg-gray-900) ─────────── */
-/* bg-gray-900 intentionally NOT overridden — it's the correct dark header */
