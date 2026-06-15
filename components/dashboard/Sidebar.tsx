@@ -198,7 +198,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
 
         {/* Sign out button */}
         <button
-          onClick={() => signOut()}
+          onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
           title="Sign out"
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors"
           style={{ color: "#64748b" }}
