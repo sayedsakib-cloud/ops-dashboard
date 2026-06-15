@@ -226,14 +226,18 @@ export default function TradingEthicsTab() {
             </Card>
           </div>
 
-          {/* Disclaimer banner */}
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 flex gap-3">
-            <span className="text-amber-500 text-lg flex-shrink-0 mt-0.5">!</span>
-            <div className="text-xs text-amber-800 leading-relaxed space-y-1">
+          {/* Disclaimer banner -- collapsible */}
+          <details className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 group">
+            <summary className="flex items-center gap-2 cursor-pointer list-none select-none text-sm font-semibold text-amber-800 [&::-webkit-details-marker]:hidden">
+              <span className="text-amber-500 text-lg flex-shrink-0">!</span>
+              Why don&apos;t these numbers match the Intercom report?
+              <span className="ml-auto text-amber-500 transition-transform group-open:rotate-90">&#8250;</span>
+            </summary>
+            <div className="mt-3 pl-7 text-xs text-amber-800 leading-relaxed space-y-2">
               <p><strong>Why is Emails Closed lower than the Intercom report?</strong> Our count uses the current conversation owner to assign credit. About 7-10% of closures are missed because some agents close conversations without formally claiming them. Intercom tracks every close action at a deeper level not accessible via the public API.</p>
-              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours — a much smaller number. These are different metrics and will not match.</p>
+              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours -- a much smaller number. These are different metrics and will not match.</p>
             </div>
-          </div>
+          </details>
 
           {/* Table 1 — Conversation Volume */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
