@@ -159,12 +159,24 @@ export default function Sidebar({ active, onSwitch }: Props) {
           className="flex items-center gap-3 p-2 rounded-lg"
           style={{ background: collapsed ? "transparent" : "#111f35" }}
         >
+        {/* Avatar — uses Google profile photo if available */}
+        {session?.user?.image ? (
+          <img
+            src={session.user.image}
+            alt={name}
+            width={32}
+            height={32}
+            referrerPolicy="no-referrer"
+            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+          />
+        ) : (
           <div
             className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)" }}
           >
             {initial}
           </div>
+        )}
 
           {!collapsed ? (
             <div className="flex-1 min-w-0">
