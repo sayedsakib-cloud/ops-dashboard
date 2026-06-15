@@ -37,9 +37,11 @@ export default function Sidebar({ active, onSwitch }: Props) {
     <div
       className="relative flex flex-col flex-shrink-0 h-screen border-r transition-all duration-300 ease-in-out"
       style={{
-        width:           collapsed ? "72px" : "240px",
-        background:      "#0e1623",
-        borderColor:     "#1a2540",
+        width:                collapsed ? "72px" : "240px",
+        background:           "rgba(11,18,32,0.55)",
+        backdropFilter:       "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        borderColor:          "rgba(148,163,184,0.10)",
       }}
     >
       {/* ── Logo / Branding ──────────────────────────────────── */}
