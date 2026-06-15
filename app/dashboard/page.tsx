@@ -21,12 +21,7 @@ export default function DashboardPage() {
   // required: true means next-auth automatically redirects to sign-in
   // if there is no session — no manual redirect logic needed,
   // no server-side redirect chain, no loops.
-  const { status } = useSession({
-    required: true,
-    onUnauthenticated() {
-      // next-auth handles the redirect to /api/auth/signin automatically
-    },
-  });
+  const { status } = useSession({ required: true });
 
   const [active,  setActive]  = useState("daily-huddle");
   const [mounted, setMounted] = useState<Record<string, boolean>>({
