@@ -1,5 +1,24 @@
 "use client";
 import { useEffect, useState } from "react";
+import { ChevronDown } from "lucide-react";
+
+// Parse FRT string (e.g. "5h 3m", "36m", "1d 6h") to decimal hours
+function parseFrtHours(s: string): number {
+  if (!s || s === "--") return Infinity;
+  let h = 0;
+  const d  = s.match(/(\d+)d/); if (d)  h += parseInt(d[1])  * 24;
+  const hr = s.match(/(\d+)h/); if (hr) h += parseInt(hr[1]);
+  const m  = s.match(/(\d+)m/); if (m)  h += parseInt(m[1])  / 60;
+  return h > 0 ? h : Infinity;
+}
+function frtStatus(frt: string): { label: string; cls: string } {
+  const h = parseFrtHours(frt);
+  if (h === Infinity) return { label: "--", cls: "" };
+  if (h <= 1) return { label: "Super Green", cls: "bg-emerald-400 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
+  if (h <= 2) return { label: "Green",       cls: "bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
+  if (h <= 4) return { label: "Yellow",      cls: "bg-amber-400 text-gray-900 text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
+  return       { label: "Red",          cls: "bg-red-400 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
+}
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type IndivRow = {
@@ -183,13 +202,10 @@ function BAUSection() {
     loadTab(bauTab, "", "", "");
   }
 
-  function renderTable(data: BAUData | null, loading: boolean, error: string | null, page: number, setPage: (p: number) => void) {
-    const totalPages = data ? Math.ceil(data.rows.length / PAGE_SIZE) : 1;
-    const pagedRows  = data ? data.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE) : [];
-
+  function renderTable(data: BAUData | null, loading: boolean, error: string | null, page: number, setPage: (p: number) => void, totalLabel: string) {
     if (loading) return (
       <div className="flex items-center justify-center py-8">
-        <span className="text-gray-400 text-sm animate-pulse">Loading…</span>
+        <span className="text-gray-400 text-sm animate-pulse">Loading...</span>
       </div>
     );
     if (error) return (
@@ -199,40 +215,97 @@ function BAUSection() {
     );
     if (!data) return null;
 
+    // Find name/agent column for by-name summary
+    const nameIdx = data.headers.findIndex(h =>
+      h.toLowerCase().includes("name") || h.toLowerCase().includes("agent")
+    );
+    const byName = new Map<string, number>();
+    if (nameIdx >= 0) {
+      data.rows.forEach(row => {
+        const n = row[nameIdx] || "Unknown";
+        byName.set(n, (byName.get(n) || 0) + 1);
+      });
+    }
+    const nameSummary = [...byName.entries()].sort((a, b) => b[1] - a[1]);
+
+    const totalPages = Math.ceil(data.rows.length / PAGE_SIZE);
+    const pagedRows  = data.rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
     return (
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-        <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-          <span className="text-sm font-semibold text-gray-800">
-            {data.filtered.toLocaleString()} of {data.total.toLocaleString()} records
-          </span>
-          {totalPages > 1 && (
-            <div className="flex items-center gap-2 text-sm text-gray-600">
-              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}
-                className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">‹</button>
-              <span className="text-xs">Page {page} / {totalPages}</span>
-              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}
-                className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">›</button>
+      <div className="space-y-4">
+
+        {/* Total count card */}
+        <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100 inline-block min-w-[220px]">
+          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{totalLabel}</p>
+          <p className="text-3xl font-bold text-gray-900">{data.filtered.toLocaleString()}</p>
+        </div>
+
+        {/* By-name summary table */}
+        {nameSummary.length > 0 ? (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+            <div className="px-5 py-3 border-b border-gray-100">
+              <p className="font-semibold text-gray-900 text-sm">Count by Name</p>
+              <p className="text-xs text-gray-400 mt-0.5">Filtered period totals per teammate</p>
             </div>
-          )}
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <THead cols={data.headers} />
-            <tbody>
-              {pagedRows.length === 0 ? (
-                <tr><td colSpan={data.headers.length} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
-              ) : pagedRows.map((row, i) => (
-                <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                  {row.map((cell, j) => (
-                    <td key={j} className="px-4 py-2.5 text-gray-700 whitespace-nowrap text-sm">
-                      {cell || "—"}
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <THead cols={[nameIdx >= 0 ? data.headers[nameIdx] : "Name", "Count"]} />
+                <tbody>
+                  {nameSummary.map(([name, count], i) => (
+                    <tr key={name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">{name}</td>
+                      <td className="px-4 py-2.5 font-bold text-gray-900 text-right pr-10">{count.toLocaleString()}</td>
+                    </tr>
                   ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ) : null}
+
+        {/* Collapsible full records */}
+        <details className="group">
+          <summary className="bg-white rounded-lg shadow-sm border border-gray-100 px-5 py-3 flex items-center justify-between cursor-pointer list-none hover:bg-gray-50 transition-colors select-none">
+            <span className="text-sm font-semibold text-gray-800">
+              View all records ({data.filtered.toLocaleString()} of {data.total.toLocaleString()})
+            </span>
+            <ChevronDown className="w-4 h-4 text-gray-400" />
+          </summary>
+          <div className="mt-2 bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+            {totalPages > 1 ? (
+              <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-end gap-2 text-sm text-gray-600">
+                <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}
+                  className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
+                  {"<"}
+                </button>
+                <span className="text-xs">Page {page} / {totalPages}</span>
+                <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}
+                  className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
+                  {">"}
+                </button>
+              </div>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <THead cols={data.headers} />
+                <tbody>
+                  {pagedRows.length === 0 ? (
+                    <tr><td colSpan={data.headers.length} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
+                  ) : pagedRows.map((row, i) => (
+                    <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                      {row.map((cell, j) => (
+                        <td key={j} className="px-4 py-2.5 text-gray-700 whitespace-nowrap text-sm">
+                          {cell || "—"}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
+
       </div>
     );
   }
@@ -291,10 +364,10 @@ function BAUSection() {
 
       {/* Sub-tab content — keep-mounted with inline style toggle */}
       <div style={{ display: bauTab === "regular" ? "block" : "none" }}>
-        {renderTable(regularData, regularLoading, regularError, regularPage, setRegularPage)}
+        {renderTable(regularData, regularLoading, regularError, regularPage, setRegularPage, "Total Task Count")}
       </div>
       <div style={{ display: bauTab === "hireflix" ? "block" : "none" }}>
-        {hirelixLoaded && renderTable(hirelixData, hirelixLoading, hirelixError, hirelixPage, setHirelixPage)}
+        {hirelixLoaded ? renderTable(hirelixData, hirelixLoading, hirelixError, hirelixPage, setHirelixPage, "Total Hireflix Count") : null}
       </div>
     </div>
   );
@@ -466,31 +539,41 @@ export default function KPITab() {
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <THead cols={["Agent","Group","Email Vol.","FRT Speed","EC Complexity","QC Grade","Remarks"]} />
+                    <THead cols={["Agent","Group","Email Vol.","FRT Count","Status","EC Complexity","QC Grade","Remarks"]} />
                     <tbody>
                       {data.individualPerformance.length === 0 ? (
-                        <tr><td colSpan={7} className="px-4 py-10 text-center text-gray-400">No data for selected period</td></tr>
-                      ) : data.individualPerformance.map((row, i) => (
-                        <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-2">
-                              <Avatar name={row.name} />
-                              <div>
-                                <div className="font-medium text-gray-900 text-sm">{row.name}</div>
-                                <div className="text-xs text-gray-400">{row.quarter}</div>
+                        <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No data for selected period</td></tr>
+                      ) : data.individualPerformance.map((row, i) => {
+                        const st = frtStatus(row.frtCount);
+                        return (
+                          <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center gap-2">
+                                <Avatar name={row.name} />
+                                <div>
+                                  <div className="font-medium text-gray-900 text-sm">{row.name}</div>
+                                  <div className="text-xs text-gray-400">{row.quarter}</div>
+                                </div>
                               </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-600">{row.complexityGroup || "—"}</td>
-                          <td className="px-4 py-3 text-right font-semibold text-gray-900">{row.emailCount || "—"}</td>
-                          <td className="px-4 py-3"><Badge val={row.frtSpeed}   cls={frtClass(row.frtSpeed)} /></td>
-                          <td className="px-4 py-3"><Badge val={row.complexity} cls={complexityClass(row.complexity)} /></td>
-                          <td className="px-4 py-3"><Badge val={qcDisplay(row.quality)} cls={qcClass(row.quality)} /></td>
-                          <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate" title={row.remarks}>
-                            {row.remarks || "—"}
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td className="px-4 py-3 text-xs text-gray-600">{row.complexityGroup || "—"}</td>
+                            <td className="px-4 py-3 text-right font-semibold text-gray-900">{row.emailCount || "—"}</td>
+                            <td className="px-4 py-3 font-medium text-gray-700">{row.frtCount || "—"}</td>
+                            <td className="px-4 py-3">
+                              {st.label === "--" ? (
+                                <span className="text-gray-400 text-xs">—</span>
+                              ) : (
+                                <span className={st.cls}>{st.label}</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3"><Badge val={row.complexity} cls={complexityClass(row.complexity)} /></td>
+                            <td className="px-4 py-3"><Badge val={qcDisplay(row.quality)} cls={qcClass(row.quality)} /></td>
+                            <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate" title={row.remarks}>
+                              {row.remarks || "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
