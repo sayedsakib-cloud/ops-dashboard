@@ -61,7 +61,12 @@ export default function DashboardPage() {
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           <div
             className="flex-shrink-0 flex items-center px-6 h-14 border-b"
-            style={{ background: "#0e1623", borderColor: "#1a2540" }}
+            style={{
+              background: "rgba(11,18,32,0.55)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+              borderColor: "rgba(148,163,184,0.10)",
+            }}
           >
             <h1 className="text-sm font-semibold" style={{ color: "#94a3b8" }}>
               {TAB_LABELS[active]}
@@ -70,7 +75,13 @@ export default function DashboardPage() {
 
           <div
             className="flex-1 overflow-y-auto ops-dark px-6 py-5"
-            style={{ background: "radial-gradient(1100px 520px at 18% -5%, #16284a 0%, #0b1a30 55%, #081120 100%)" }}
+            style={{
+              background:
+                "radial-gradient(900px 480px at 10% -10%, rgba(56,189,248,0.10), transparent 60%)," +
+                "radial-gradient(820px 560px at 100% 0%, rgba(129,140,248,0.11), transparent 55%)," +
+                "radial-gradient(760px 520px at 50% 115%, rgba(45,212,191,0.05), transparent 60%)," +
+                "linear-gradient(180deg, #0a1322 0%, #070d18 100%)",
+            }}
           >
             <div style={vis("daily-huddle")}>
               {mounted["daily-huddle"] ? <DailyHuddleTab /> : null}
