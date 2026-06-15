@@ -389,7 +389,9 @@ export default function TicketsTab() {
                   />
                   <Tooltip
                     formatter={(v: any) => [v, "Tickets"]}
-                    contentStyle={{ fontSize: 12, borderRadius: 8 }}
+                    contentStyle={{ fontSize: 12, borderRadius: 8, backgroundColor: "#ffffff", border: "1px solid #e5e7eb", color: "#111827" }}
+                    labelStyle={{ color: "#111827", fontWeight: 600 }}
+                    itemStyle={{ color: "#111827" }}
                   />
                   <Bar dataKey="count" radius={[0, 4, 4, 0]}>
                     {(cur.data?.ticketTypeStats ?? []).map((_, idx) => (
