@@ -32,6 +32,22 @@ type TeepData = {
   agents: AgentRow[];
 };
 
+// ── Cache (sessionStorage, survives refresh; clears when the tab closes) ────
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+function cacheKey(from: string, to: string) { return `teep:v1:${from}:${to}`; }
+function getCached(key: string): TeepData | null {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+    const { data, ts } = JSON.parse(raw);
+    if (Date.now() - ts > CACHE_TTL) { sessionStorage.removeItem(key); return null; }
+    return data as TeepData;
+  } catch { return null; }
+}
+function setCached(key: string, data: TeepData) {
+  try { sessionStorage.setItem(key, JSON.stringify({ data, ts: Date.now() })); } catch {}
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────
 const PALETTE = [
   "bg-indigo-500","bg-purple-500","bg-pink-500","bg-blue-500",
@@ -123,6 +139,10 @@ export default function TradingEthicsTab() {
   const [to,      setTo]      = useState("");
 
   async function load(start?: string, end?: string) {
+    const key = cacheKey(start ?? "", end ?? "");
+    const hit = getCached(key);
+    if (hit) { setData(hit); setError(null); setLoading(false); return; }
+
     setLoading(true); setError(null);
     try {
       const p = new URLSearchParams();
@@ -132,6 +152,7 @@ export default function TradingEthicsTab() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed");
       setData(json);
+      setCached(key, json);
     } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
     finally { setLoading(false); }
   }
