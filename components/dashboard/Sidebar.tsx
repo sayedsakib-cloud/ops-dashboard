@@ -37,9 +37,12 @@ export default function Sidebar({ active, onSwitch }: Props) {
     <div
       className="relative flex flex-col flex-shrink-0 h-screen border-r transition-all duration-300 ease-in-out"
       style={{
-        width:           collapsed ? "72px" : "240px",
-        background:      "#0e1623",
-        borderColor:     "#1a2540",
+        width:                collapsed ? "72px" : "240px",
+        background:           "rgba(11,18,32,0.55)",
+        backdropFilter:       "blur(10px)",
+        WebkitBackdropFilter: "blur(10px)",
+        borderColor:          "rgba(148,163,184,0.10)",
+        zIndex:               30,
       }}
     >
       {/* ── Logo / Branding ──────────────────────────────────── */}
@@ -59,7 +62,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
 
         {!collapsed ? (
           <span
-            className="font-semibold text-sm whitespace-nowrap"
+            className="font-bold text-xl whitespace-nowrap"
             style={{ color: "#e2e8f0" }}
           >
             Ops Metrics
@@ -99,12 +102,13 @@ export default function Sidebar({ active, onSwitch }: Props) {
               key={item.id}
               onClick={() => onSwitch(item.id)}
               title={collapsed ? item.label : undefined}
-              className="relative w-full flex items-center gap-3 py-2.5 mb-0.5 text-left transition-all duration-150"
+              className="relative w-full flex items-center gap-3 py-2.5 mb-1 text-left rounded-xl transition-all duration-150"
               style={{
-                paddingLeft:     "16px",
-                paddingRight:    "16px",
-                background:      isActive ? "rgba(14,165,233,0.10)" : "transparent",
-                color:           isActive ? "#7dd3fc"               : "#64748b",
+                paddingLeft:     "12px",
+                paddingRight:    "12px",
+                background:   isActive ? "rgba(14,165,233,0.12)" : "transparent",
+                border:       isActive ? "1px solid rgba(56,189,248,0.22)" : "1px solid transparent",
+                color:        isActive ? "#7dd3fc" : "#64748b",
               }}
               onMouseEnter={e => {
                 if (!isActive) {
@@ -119,26 +123,14 @@ export default function Sidebar({ active, onSwitch }: Props) {
                 }
               }}
             >
-              {/* Active left border indicator */}
-              {isActive ? (
-                <span
-                  className="absolute left-0 top-0 bottom-0 w-0.5 rounded-r"
-                  style={{ background: "#38bdf8" }}
-                />
-              ) : null}
-
               <Icon
                 className="flex-shrink-0"
-                style={{
-                  width:  "18px",
-                  height: "18px",
-                  color:  isActive ? "#38bdf8" : "currentColor",
-                }}
-              />
+                style={{ width: "18px", height: "18px", color: isActive ? "#38bdf8" : "currentColor" }}
+                />
 
               {!collapsed ? (
                 <span
-                  className="text-sm font-medium whitespace-nowrap overflow-hidden text-ellipsis"
+                  className="text-base font-medium whitespace-nowrap overflow-hidden text-ellipsis"
                   style={{ color: "inherit" }}
                 >
                   {item.label}
@@ -159,12 +151,24 @@ export default function Sidebar({ active, onSwitch }: Props) {
           className="flex items-center gap-3 p-2 rounded-lg"
           style={{ background: collapsed ? "transparent" : "#111f35" }}
         >
+        {/* Avatar — uses Google profile photo if available */}
+        {session?.user?.image ? (
+          <img
+            src={session.user.image}
+            alt={name}
+            width={32}
+            height={32}
+            referrerPolicy="no-referrer"
+            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
+          />
+        ) : (
           <div
             className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
             style={{ background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)" }}
           >
             {initial}
           </div>
+        )}
 
           {!collapsed ? (
             <div className="flex-1 min-w-0">
@@ -186,7 +190,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
 
         {/* Sign out button */}
         <button
-          onClick={() => signOut()}
+          onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
           title="Sign out"
           className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors"
           style={{ color: "#64748b" }}

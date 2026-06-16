@@ -1,76 +1,47 @@
 "use client";
-import { useState } from "react";
-import DailyHuddleTab   from "@/components/dashboard/tabs/DailyHuddleTab";
-import KPITab           from "@/components/dashboard/tabs/KPITab";
-import RegularTaskTab   from "@/components/dashboard/tabs/RegularTaskTab";
-import TicketsTab       from "@/components/dashboard/tabs/TicketsTab";
-import TradingEthicsTab from "@/components/dashboard/tabs/TradingEthicsTab";
 
-const TABS = [
-  { id: "daily-huddle",   label: "Daily Huddle"                     },
-  { id: "kpi",            label: "KPI"                              },
-  { id: "regular-task",   label: "Regular Task"                     },
-  { id: "tickets",        label: "Tickets"                          },
-  { id: "trading-ethics", label: "Trading Ethics Email Performance" },
-];
+import { useEffect } from "react";
+import { signIn, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
 
-export default function DashboardPage() {
-  const [active,  setActive]  = useState("daily-huddle");
-  // Record<id, mounted> — once true, never removed, component stays in DOM
-  const [mounted, setMounted] = useState<Record<string, boolean>>({
-    "daily-huddle": true,
-  });
+export default function RootPage() {
+  const { status } = useSession();
+  const router = useRouter();
 
-  function switchTab(id: string) {
-    setActive(id);
-    if (!mounted[id]) setMounted(prev => ({ ...prev, [id]: true }));
+  // Already signed in -> go straight to the dashboard (once).
+  useEffect(() => {
+    if (status === "authenticated") {
+      router.replace("/dashboard");
+    }
+  }, [status, router]);
+
+  // While NextAuth checks the session, or while forwarding an
+  // authenticated user, show a neutral spinner -- NO redirect here.
+  if (status === "loading" || status === "authenticated") {
+    return (
+      <div className="flex h-screen items-center justify-center" style={{ background: "#0a1628" }}>
+        <div className="inline-block w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
-  // Inline style toggle — cannot be overridden by any CSS class
-  const vis = (id: string): React.CSSProperties => ({
-    display: active === id ? "block" : "none",
-  });
-
+  // Not signed in -> this is the actual sign-in screen (pages.signIn = "/").
   return (
-    <div className="min-h-screen bg-gray-100">
-      {/* Tab navigation */}
-      <div className="bg-white border-b border-gray-200 shadow-sm sticky top-0 z-10">
-        <div className="max-w-screen-2xl mx-auto px-6">
-          <nav className="flex overflow-x-auto">
-            {TABS.map(tab => (
-              <button
-                key={tab.id}
-                onClick={() => switchTab(tab.id)}
-                className={`px-5 py-4 text-sm font-medium whitespace-nowrap border-b-2 transition-colors focus:outline-none ${
-                  active === tab.id
-                    ? "border-indigo-600 text-indigo-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-                }`}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-      </div>
-
-      {/* Tab content — each tab mounts once on first visit, then persists via display style */}
-      <div className="max-w-screen-2xl mx-auto px-6 py-6">
-        <div style={vis("daily-huddle")}>
-          {mounted["daily-huddle"] && <DailyHuddleTab />}
-        </div>
-        <div style={vis("kpi")}>
-          {mounted["kpi"] && <KPITab />}
-        </div>
-        <div style={vis("regular-task")}>
-          {mounted["regular-task"] && <RegularTaskTab />}
-        </div>
-        <div style={vis("tickets")}>
-          {mounted["tickets"] && <TicketsTab />}
-        </div>
-        <div style={vis("trading-ethics")}>
-          {mounted["trading-ethics"] && <TradingEthicsTab />}
-        </div>
+    <div className="flex h-screen items-center justify-center" style={{ background: "#0a1628" }}>
+      <div
+        className="w-full max-w-sm rounded-2xl border p-8 text-center"
+        style={{ background: "#0e1623", borderColor: "#1a2540" }}
+      >
+        <h1 className="mb-1 text-lg font-semibold text-slate-100">Ops Dashboard</h1>
+        <p className="mb-6 text-sm text-slate-400">
+          Sign in with your work Google account to continue.
+        </p>
+        <button
+          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
+          className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500"
+        >
+          Sign in with Google
+        </button>
       </div>
     </div>
   );
