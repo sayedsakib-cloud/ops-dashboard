@@ -20,12 +20,14 @@ export const authOptions: NextAuthOptions = {
     }),
   ],
   callbacks: {
-    async signIn({ account, profile }) {
-      if (account?.provider === "google") {
-        return profile?.email?.toString().endsWith(`@${process.env.ALLOWED_DOMAIN}`) ?? false;
-      }
-      return false;
-    },
+     async signIn({ account, profile }) {
+      if (account?.provider !== "google") return false;
+        const p = profile as { email?: string; email_verified?: boolean; hd?: string };
+        return (
+          p.email_verified === true &&
+          (p.email?.endsWith(`@${process.env.ALLOWED_DOMAIN}`) ?? false)
+        );
+     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.sub;
