@@ -1,5 +1,11 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Loader2, ArrowRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 // -- Types ------------------------------------------------------------------
 type Fmt    = "number" | "hrs" | "currency";
@@ -37,25 +43,26 @@ function fmtDate(iso: string) {
 function MetricCard({ m }: { m: Metric }) {
   const up = (m.change ?? 0) >= 0;
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100 flex flex-col justify-between min-h-[90px]">
-      <div className="text-xs text-gray-500 font-medium leading-snug mb-2">{m.label}</div>
+    <Card className="flex min-h-[90px] flex-col justify-between gap-0 p-4">
+      <div className="mb-2 text-xs font-medium leading-snug text-muted-foreground">{m.label}</div>
       <div>
-        <div className="text-2xl font-bold text-gray-900">{fmtVal(m)}</div>
+        <div className="text-2xl font-bold">{fmtVal(m)}</div>
         {m.change !== null && (
-          <div className={`text-xs mt-0.5 font-semibold ${up ? "text-green-600" : "text-red-500"}`}>
+          <div className={cn("mt-0.5 text-xs font-semibold", up ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
             {up ? "+" : ""}{m.change.toFixed(1)}%
           </div>
         )}
       </div>
-    </div>
+    </Card>
   );
 }
 
-function SectionHeader({ title }: { title: string }) {
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-indigo-950 text-white text-center font-semibold py-2.5 text-sm tracking-wide rounded-t-lg">
-      {title}
-    </div>
+    <Card className="gap-0 overflow-hidden py-0">
+      <div className="bg-indigo-600 py-2.5 text-center text-sm font-semibold tracking-wide text-white">{title}</div>
+      <div className="space-y-3 bg-muted/30 p-4">{children}</div>
+    </Card>
   );
 }
 
@@ -92,15 +99,15 @@ export default function DailyHuddleTab() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-gray-400 text-sm animate-pulse">Loading Daily Huddle data...</div>
+      <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" /> Loading Daily Huddle data...
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
+      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
         Error: {error}
       </div>
     );
@@ -117,100 +124,63 @@ export default function DailyHuddleTab() {
 
   return (
     <div className="space-y-5">
-
       {/* Header + Date range picker */}
-      <div className="bg-white rounded-lg shadow-sm px-6 py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <h1 className="text-xl font-bold text-gray-900">Daily Huddle - Operations</h1>
+      <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <h1 className="text-xl font-bold">Daily Huddle - Operations</h1>
 
         <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1">From</label>
-            <input
-              type="date"
-              value={rangeStart}
-              min={minDate}
-              max={maxDate}
-              onChange={e => setStart(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">From</Label>
+            <Input type="date" value={rangeStart} min={minDate} max={maxDate}
+              onChange={e => setStart(e.target.value)} className="w-auto" />
           </div>
-
-          <div>
-            <label className="block text-xs text-gray-500 font-medium mb-1">To</label>
-            <input
-              type="date"
-              value={rangeEnd}
-              min={minDate}
-              max={maxDate}
-              onChange={e => setEnd(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">To</Label>
+            <Input type="date" value={rangeEnd} min={minDate} max={maxDate}
+              onChange={e => setEnd(e.target.value)} className="w-auto" />
           </div>
-
-          <button
-            onClick={() => load(rangeStart, rangeEnd)}
-            className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors"
-          >
-            Apply
-          </button>
-
-          <button
-            onClick={() => { setStart(""); setEnd(""); load(); }}
-            className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 transition-colors"
-          >
-            Reset
-          </button>
-
+          <Button onClick={() => load(rangeStart, rangeEnd)}>Apply</Button>
+          <Button variant="secondary" onClick={() => { setStart(""); setEnd(""); load(); }}>Reset</Button>
           {rangeLabel && (
-            <span className="text-xs text-gray-400 hidden md:inline self-end pb-2">
-              {rangeLabel}
-            </span>
+            <span className="hidden self-end pb-2 text-xs text-muted-foreground md:inline">{rangeLabel}</span>
           )}
         </div>
-      </div>
+      </Card>
 
       {/* BizOps section */}
-      <div className="rounded-lg overflow-hidden shadow-sm">
-        <SectionHeader title="BizOps Last Day Metrics" />
-        <div className="bg-gray-50 p-4 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {data.bizops.map(m => <MetricCard key={m.label} m={m} />)}
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
-            <MetricCard m={data.bizopsEligible.fnProcessed} />
-            <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100 flex flex-col items-center justify-center text-center">
-              <span className="text-sm font-bold text-gray-700 leading-tight">{"Today's"}</span>
-              <span className="text-sm font-bold text-gray-700 leading-tight">Eligible Count</span>
-              <span className="text-2xl text-indigo-600 font-bold mt-1">{"->"}</span>
-            </div>
-            <MetricCard m={data.bizopsEligible.eligibleKYC} />
-            <MetricCard m={data.bizopsEligible.eligiblePayout} />
-          </div>
+      <Section title="BizOps Last Day Metrics">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {data.bizops.map(m => <MetricCard key={m.label} m={m} />)}
         </div>
-      </div>
+        <div className="grid grid-cols-2 items-stretch gap-3 md:grid-cols-4">
+          <MetricCard m={data.bizopsEligible.fnProcessed} />
+          <Card className="flex flex-col items-center justify-center gap-0 p-4 text-center">
+            <span className="text-sm font-bold leading-tight">Today&apos;s</span>
+            <span className="text-sm font-bold leading-tight">Eligible Count</span>
+            <ArrowRight className="mt-1 h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+          </Card>
+          <MetricCard m={data.bizopsEligible.eligibleKYC} />
+          <MetricCard m={data.bizopsEligible.eligiblePayout} />
+        </div>
+      </Section>
 
       {/* CR section */}
-      <div className="rounded-lg overflow-hidden shadow-sm">
-        <SectionHeader title="CR Last Day Metrics" />
-        <div className="bg-gray-50 p-4 space-y-3">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {data.cr.map(m => <MetricCard key={m.label} m={m} />)}
-          </div>
-
-          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-100 text-center">
-            <div className="text-sm text-gray-500 font-medium mb-1">{data.crSavings.label}</div>
-            <div className="text-4xl font-bold text-gray-900">{fmtVal(data.crSavings)}</div>
-            {data.crSavings.change !== null && (
-              <div className={`text-sm mt-1.5 font-semibold ${(data.crSavings.change ?? 0) >= 0 ? "text-green-600" : "text-red-500"}`}>
-                {(data.crSavings.change ?? 0) >= 0 ? "+" : ""}{Math.abs(data.crSavings.change).toFixed(1)}%
-              </div>
-            )}
-          </div>
+      <Section title="CR Last Day Metrics">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {data.cr.map(m => <MetricCard key={m.label} m={m} />)}
         </div>
-      </div>
+        <Card className="gap-0 p-6 text-center">
+          <div className="mb-1 text-sm font-medium text-muted-foreground">{data.crSavings.label}</div>
+          <div className="text-4xl font-bold">{fmtVal(data.crSavings)}</div>
+          {data.crSavings.change !== null && (
+            <div className={cn("mt-1.5 text-sm font-semibold", (data.crSavings.change ?? 0) >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400")}>
+              {(data.crSavings.change ?? 0) >= 0 ? "+" : ""}{Math.abs(data.crSavings.change).toFixed(1)}%
+            </div>
+          )}
+        </Card>
+      </Section>
 
-      <p className="text-xs text-gray-400 text-right">
+      <p className="text-right text-xs text-muted-foreground">
         {isRange
           ? "Showing " + fmtDate(data.rangeStart) + " to " + fmtDate(data.rangeEnd)
           : "Showing " + fmtDate(data.rangeEnd)}
