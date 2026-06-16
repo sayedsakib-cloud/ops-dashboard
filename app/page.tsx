@@ -63,7 +63,7 @@ export default function DashboardPage() {
           </header>
 
           <div className="flex-1 overflow-y-auto bg-muted/30 px-6 py-5">
-            <div style={vis("daily-huddle")} className={cn(legacy)}>
+            <div style={vis("daily-huddle")}>
               {mounted["daily-huddle"] ? <DailyHuddleTab /> : null}
             </div>
             <div style={vis("kpi")}>
@@ -75,7 +75,7 @@ export default function DashboardPage() {
             <div style={vis("tickets")}>
               {mounted["tickets"] ? <TicketsTab /> : null}
             </div>
-            <div style={vis("trading-ethics")} className={cn(legacy)}>
+            <div style={vis("trading-ethics")}>
               {mounted["trading-ethics"] ? <TradingEthicsTab /> : null}
             </div>
           </div>
