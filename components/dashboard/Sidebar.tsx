@@ -1,216 +1,98 @@
 "use client";
 import { useState } from "react";
 import { signOut, useSession } from "next-auth/react";
-import {
-  Users,
-  BarChart3,
-  CheckSquare,
-  Inbox,
-  Mail,
-  ChevronLeft,
-  ChevronRight,
-  LogOut,
-} from "lucide-react";
+import { Users, BarChart3, CheckSquare, Inbox, Mail, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 const NAV = [
-  { id: "daily-huddle",   label: "Daily Huddle",             icon: Users       },
-  { id: "kpi",            label: "KPI",                      icon: BarChart3   },
-  { id: "regular-task",   label: "Regular Task",             icon: CheckSquare },
-  { id: "tickets",        label: "Tickets",                  icon: Inbox       },
-  { id: "trading-ethics", label: "Trading Ethics Email",     icon: Mail        },
+  { id: "daily-huddle",   label: "Daily Huddle",         icon: Users       },
+  { id: "kpi",            label: "KPI",                  icon: BarChart3   },
+  { id: "regular-task",   label: "Regular Task",         icon: CheckSquare },
+  { id: "tickets",        label: "Tickets",              icon: Inbox       },
+  { id: "trading-ethics", label: "Trading Ethics Email", icon: Mail        },
 ];
 
-type Props = {
-  active: string;
-  onSwitch: (id: string) => void;
-};
+type Props = { active: string; onSwitch: (id: string) => void };
 
 export default function Sidebar({ active, onSwitch }: Props) {
   const [collapsed, setCollapsed] = useState(false);
   const { data: session } = useSession();
-
-  const name    = session?.user?.name  ?? "User";
-  const email   = session?.user?.email ?? "";
+  const name = session?.user?.name ?? "User";
+  const email = session?.user?.email ?? "";
   const initial = name.charAt(0).toUpperCase();
 
   return (
-    <div
-      className="relative flex flex-col flex-shrink-0 h-screen border-r transition-all duration-300 ease-in-out"
-      style={{
-        width:                collapsed ? "72px" : "240px",
-        background:           "rgba(11,18,32,0.55)",
-        backdropFilter:       "blur(10px)",
-        WebkitBackdropFilter: "blur(10px)",
-        borderColor:          "rgba(148,163,184,0.10)",
-        zIndex:               30,
-      }}
-    >
-      {/* ── Logo / Branding ──────────────────────────────────── */}
-      <div
-        className="flex items-center gap-3 px-4 h-16 border-b flex-shrink-0"
-        style={{ borderColor: "#1a2540" }}
-      >
-        {/* FN logo — place fn-logo.svg in /public/fn-logo.svg */}
-        <img
-          src="/fn-logo.svg"
-          alt="FN"
-          width={32}
-          height={32}
-          className="flex-shrink-0 rounded-sm"
-          style={{ objectFit: "contain" }}
-        />
-
-        {!collapsed ? (
-          <span
-            className="font-bold text-xl whitespace-nowrap"
-            style={{ color: "#e2e8f0" }}
-          >
-            Ops Metrics
-          </span>
-        ) : null}
+    <aside className={cn(
+      "relative z-30 flex h-screen flex-shrink-0 flex-col border-r border-sidebar-border",
+      "bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out",
+      collapsed ? "w-[72px]" : "w-60",
+    )}>
+      <div className="flex h-16 flex-shrink-0 items-center gap-3 border-b border-sidebar-border px-4">
+        <img src="/fn-logo.svg" alt="FN" width={32} height={32} className="flex-shrink-0 rounded-sm object-contain" />
+        {!collapsed ? <span className="whitespace-nowrap text-xl font-bold tracking-tight">Ops Metrics</span> : null}
       </div>
 
-      {/* ── Collapse toggle ───────────────────────────────────── */}
       <button
-        onClick={() => setCollapsed(prev => !prev)}
+        onClick={() => setCollapsed(p => !p)}
         title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-        className="absolute z-10 flex items-center justify-center w-6 h-6 rounded-full transition-colors"
-        style={{
-          top:         "44px",
-          right:       "-12px",
-          background:  "#1e2d47",
-          border:      "1px solid #2a3d5e",
-        }}
-        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = "#263a5a"; }}
-        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = "#1e2d47"; }}
-      >
-        {collapsed ? (
-          <ChevronRight className="w-3 h-3" style={{ color: "#94a3b8" }} />
-        ) : (
-          <ChevronLeft  className="w-3 h-3" style={{ color: "#94a3b8" }} />
+        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className={cn(
+          "absolute -right-3 top-[72px] z-40 flex h-6 w-6 items-center justify-center",
+          "rounded-full border border-border bg-background text-muted-foreground shadow-sm",
+          "transition-colors hover:bg-accent hover:text-accent-foreground",
         )}
+      >
+        {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
       </button>
 
-      {/* ── Navigation items ─────────────────────────────────── */}
-      <nav className="flex-1 py-3 overflow-hidden">
+      <nav className="flex-1 space-y-1 overflow-hidden px-2 py-3">
         {NAV.map(item => {
-          const Icon     = item.icon;
+          const Icon = item.icon;
           const isActive = active === item.id;
-
           return (
-            <button
-              key={item.id}
-              onClick={() => onSwitch(item.id)}
+            <button key={item.id} onClick={() => onSwitch(item.id)}
               title={collapsed ? item.label : undefined}
-              className="relative w-full flex items-center gap-3 py-2.5 mb-1 text-left rounded-xl transition-all duration-150"
-              style={{
-                paddingLeft:     "12px",
-                paddingRight:    "12px",
-                background:   isActive ? "rgba(14,165,233,0.12)" : "transparent",
-                border:       isActive ? "1px solid rgba(56,189,248,0.22)" : "1px solid transparent",
-                color:        isActive ? "#7dd3fc" : "#64748b",
-              }}
-              onMouseEnter={e => {
-                if (!isActive) {
-                  (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.04)";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#94a3b8";
-                }
-              }}
-              onMouseLeave={e => {
-                if (!isActive) {
-                  (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-                  (e.currentTarget as HTMLButtonElement).style.color = "#64748b";
-                }
-              }}
-            >
-              <Icon
-                className="flex-shrink-0"
-                style={{ width: "18px", height: "18px", color: isActive ? "#38bdf8" : "currentColor" }}
-                />
-
-              {!collapsed ? (
-                <span
-                  className="text-base font-medium whitespace-nowrap overflow-hidden text-ellipsis"
-                  style={{ color: "inherit" }}
-                >
-                  {item.label}
-                </span>
-              ) : null}
+              className={cn(
+                "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors duration-150",
+                isActive
+                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                  : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+              )}>
+              <Icon className="h-[18px] w-[18px] flex-shrink-0" />
+              {!collapsed ? <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.label}</span> : null}
             </button>
           );
         })}
       </nav>
 
-      {/* ── User info + Sign out ─────────────────────────────── */}
-      <div
-        className="border-t flex-shrink-0 p-3 space-y-1"
-        style={{ borderColor: "#1a2540" }}
-      >
-        {/* User card */}
-        <div
-          className="flex items-center gap-3 p-2 rounded-lg"
-          style={{ background: collapsed ? "transparent" : "#111f35" }}
-        >
-        {/* Avatar — uses Google profile photo if available */}
-        {session?.user?.image ? (
-          <img
-            src={session.user.image}
-            alt={name}
-            width={32}
-            height={32}
-            referrerPolicy="no-referrer"
-            className="w-8 h-8 rounded-full object-cover flex-shrink-0"
-          />
-        ) : (
-          <div
-            className="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-white text-xs font-bold"
-            style={{ background: "linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)" }}
-          >
-            {initial}
-          </div>
-        )}
-
+      <div className="flex-shrink-0 space-y-1 border-t border-sidebar-border p-3">
+        <div className={cn("flex items-center gap-3 rounded-md p-2", collapsed ? "bg-transparent" : "bg-sidebar-accent/50")}>
+          {session?.user?.image ? (
+            <img src={session.user.image} alt={name} width={32} height={32} referrerPolicy="no-referrer"
+              className="h-8 w-8 flex-shrink-0 rounded-full object-cover" />
+          ) : (
+            <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-primary text-xs font-bold text-primary-foreground">
+              {initial}
+            </div>
+          )}
           {!collapsed ? (
-            <div className="flex-1 min-w-0">
-              <p
-                className="text-xs font-semibold truncate"
-                style={{ color: "#cbd5e1" }}
-              >
-                {name}
-              </p>
-              <p
-                className="text-[10px] truncate"
-                style={{ color: "#475569" }}
-              >
-                {email}
-              </p>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-xs font-semibold text-sidebar-foreground">{name}</p>
+              <p className="truncate text-[10px] text-muted-foreground">{email}</p>
             </div>
           ) : null}
         </div>
 
-        {/* Sign out button */}
-        <button
-          onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
+        <button onClick={() => signOut({ callbackUrl: "/api/auth/signin" })}
           title="Sign out"
-          className="w-full flex items-center gap-2 px-2 py-1.5 rounded-lg transition-colors"
-          style={{ color: "#64748b" }}
-          onMouseEnter={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#f87171";
-            (e.currentTarget as HTMLButtonElement).style.background = "rgba(239,68,68,0.08)";
-          }}
-          onMouseLeave={e => {
-            (e.currentTarget as HTMLButtonElement).style.color = "#64748b";
-            (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-          }}
-        >
-          <LogOut style={{ width: "15px", height: "15px", flexShrink: 0 }} />
-          {!collapsed ? (
-            <span className="text-xs font-medium" style={{ color: "inherit" }}>
-              Sign Out
-            </span>
-          ) : null}
+          className={cn(
+            "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium",
+            "text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
+          )}>
+          <LogOut className="h-[15px] w-[15px] flex-shrink-0" />
+          {!collapsed ? <span>Sign Out</span> : null}
         </button>
       </div>
-    </div>
+    </aside>
   );
 }

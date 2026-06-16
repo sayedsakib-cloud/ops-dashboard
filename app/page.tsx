@@ -1,48 +1,71 @@
 "use client";
+import { useState, useEffect } from "react";
+import { useSession } from "next-auth/react";
+import { useTheme } from "next-themes";
+import { Loader2 } from "lucide-react";
+import DailyHuddleTab from "@/components/dashboard/tabs/DailyHuddleTab";
+import KPITab from "@/components/dashboard/tabs/KPITab";
+import RegularTaskTab from "@/components/dashboard/tabs/RegularTaskTab";
+import TicketsTab from "@/components/dashboard/tabs/TicketsTab";
+import TradingEthicsTab from "@/components/dashboard/tabs/TradingEthicsTab";
+import Sidebar from "@/components/dashboard/Sidebar";
+import DashboardLoader from "@/components/dashboard/DashboardLoader";
+import ModeToggle from "@/components/layout/ModeToggle";
+import { cn } from "@/lib/utils";
 
-import { useEffect } from "react";
-import { signIn, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
+const TAB_LABELS: Record<string, string> = {
+  "daily-huddle": "Daily Huddle",
+  "kpi": "KPI",
+  "regular-task": "Regular Task",
+  "tickets": "Tickets",
+  "trading-ethics": "Trading Ethics Email Performance",
+};
 
-export default function RootPage() {
-  const { status } = useSession();
-  const router = useRouter();
+export default function DashboardPage() {
+  const { status } = useSession({ required: true });
+  const { resolvedTheme } = useTheme();
+  const [active, setActive] = useState("daily-huddle");
+  const [mounted, setMounted] = useState<Record<string, boolean>>({ "daily-huddle": true });
+  const [themeReady, setThemeReady] = useState(false);
+  useEffect(() => { setThemeReady(true); }, []);
 
-  // Already signed in -> go straight to the dashboard (once).
-  useEffect(() => {
-    if (status === "authenticated") {
-      router.replace("/dashboard");
-    }
-  }, [status, router]);
+  function switchTab(id: string) {
+    setActive(id);
+    if (!mounted[id]) setMounted(prev => ({ ...prev, [id]: true }));
+  }
+  const vis = (id: string): React.CSSProperties => ({ display: active === id ? "block" : "none" });
 
-  // While NextAuth checks the session, or while forwarding an
-  // authenticated user, show a neutral spinner -- NO redirect here.
-  if (status === "loading" || status === "authenticated") {
+  if (status === "loading") {
     return (
-      <div className="flex h-screen items-center justify-center" style={{ background: "#0a1628" }}>
-        <div className="inline-block w-8 h-8 border-4 border-sky-500 border-t-transparent rounded-full animate-spin" />
+      <div className="flex h-screen items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">Verifying session...</p>
+        </div>
       </div>
     );
   }
 
-  // Not signed in -> this is the actual sign-in screen (pages.signIn = "/").
+  const darkTabs = themeReady && resolvedTheme === "dark";
+
   return (
-    <div className="flex h-screen items-center justify-center" style={{ background: "#0a1628" }}>
-      <div
-        className="w-full max-w-sm rounded-2xl border p-8 text-center"
-        style={{ background: "#0e1623", borderColor: "#1a2540" }}
-      >
-        <h1 className="mb-1 text-lg font-semibold text-slate-100">Ops Dashboard</h1>
-        <p className="mb-6 text-sm text-slate-400">
-          Sign in with your work Google account to continue.
-        </p>
-        <button
-          onClick={() => signIn("google", { callbackUrl: "/dashboard" })}
-          className="w-full rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-sky-500"
-        >
-          Sign in with Google
-        </button>
+    <DashboardLoader>
+      <div className="flex h-screen overflow-hidden bg-background">
+        <Sidebar active={active} onSwitch={switchTab} />
+        <div className="flex flex-1 flex-col overflow-hidden min-w-0">
+          <header className="flex h-14 flex-shrink-0 items-center gap-4 border-b border-border bg-background/80 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+            <h1 className="text-sm font-medium text-foreground">{TAB_LABELS[active]}</h1>
+            <div className="ml-auto"><ModeToggle /></div>
+          </header>
+          <div className={cn("flex-1 overflow-y-auto bg-muted/30 px-6 py-5", darkTabs && "ops-dark")}>
+            <div style={vis("daily-huddle")}>{mounted["daily-huddle"] ? <DailyHuddleTab /> : null}</div>
+            <div style={vis("kpi")}>{mounted["kpi"] ? <KPITab /> : null}</div>
+            <div style={vis("regular-task")}>{mounted["regular-task"] ? <RegularTaskTab /> : null}</div>
+            <div style={vis("tickets")}>{mounted["tickets"] ? <TicketsTab /> : null}</div>
+            <div style={vis("trading-ethics")}>{mounted["trading-ethics"] ? <TradingEthicsTab /> : null}</div>
+          </div>
+        </div>
       </div>
-    </div>
+    </DashboardLoader>
   );
 }

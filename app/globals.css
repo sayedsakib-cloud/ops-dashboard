@@ -1,49 +1,131 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.129 0.042 264.695);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.129 0.042 264.695);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.129 0.042 264.695);
+  --primary: oklch(0.208 0.042 265.755);
+  --primary-foreground: oklch(0.984 0.003 247.858);
+  --secondary: oklch(0.968 0.007 247.896);
+  --secondary-foreground: oklch(0.208 0.042 265.755);
+  --muted: oklch(0.968 0.007 247.896);
+  --muted-foreground: oklch(0.554 0.046 257.417);
+  --accent: oklch(0.968 0.007 247.896);
+  --accent-foreground: oklch(0.208 0.042 265.755);
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(0.929 0.013 255.508);
+  --input: oklch(0.929 0.013 255.508);
+  --ring: oklch(0.704 0.04 256.788);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.984 0.003 247.858);
+  --sidebar-foreground: oklch(0.129 0.042 264.695);
+  --sidebar-primary: oklch(0.208 0.042 265.755);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.968 0.007 247.896);
+  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
+  --sidebar-border: oklch(0.929 0.013 255.508);
+  --sidebar-ring: oklch(0.704 0.04 256.788);
+}
+
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
 }
 
 @theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
-
-/* Dark date inputs across all tabs */
-input[type="date"] {
-  color-scheme: dark;
-  background-color: #1e2d47;
-  color: #e2e8f0;
-  border-color: #2a3d5e !important;
-}
-input[type="date"]:focus {
-  border-color: #6366f1 !important;
-  outline: none;
+@layer base {
+  * { @apply border-border outline-ring/50; }
+  body { @apply bg-background text-foreground; }
 }
 
 /* ===================================================================
-   OPS METRICS -- GLASS THEME (subtle frost, ambient glow, current mix)
-   Applied via .ops-dark wrapper on the scrollable content div.
-   Glass is scoped to cards/panels; table rows stay crisp & solid.
+   TRANSITIONAL: legacy .ops-dark glass theme. Kept ONLY so tabs not yet
+   migrated to shadcn tokens still render in dark mode. The shell applies
+   `.ops-dark` to the scroll container only when the theme is dark.
+   Delete this whole block once every tab is migrated.
    =================================================================== */
-
-/* -- Frosted glass card & surface backgrounds -- */
 .ops-dark .bg-white {
   background-color: rgba(19, 28, 47, 0.72) !important;
   backdrop-filter: blur(10px) saturate(118%);
@@ -51,116 +133,59 @@ input[type="date"]:focus {
 }
 .ops-dark .bg-gray-50  { background-color: #0d1626 !important; }
 .ops-dark .bg-gray-100 { background-color: #0b1421 !important; }
-
-/* -- Carve table rows OUT of the glass (keeps data crisp & readable) -- */
 .ops-dark tr.bg-white {
   background-color: rgba(255, 255, 255, 0.025) !important;
-  backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
-  box-shadow: none !important;
+  backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important;
 }
-.ops-dark tr.bg-gray-50\/60 {
-  background-color: transparent !important;
-  backdrop-filter: none !important;
-}
-.ops-dark tr.bg-white:hover,
-.ops-dark tr.bg-gray-50\/60:hover { background-color: rgba(56, 189, 248, 0.06) !important; }
-
-/* -- Hairline glass borders -- */
-.ops-dark .border-gray-100,
-.ops-dark .border-gray-200,
-.ops-dark .border-gray-300 { border-color: rgba(148, 163, 184, 0.10) !important; }
+.ops-dark tr.bg-gray-50\/60 { background-color: transparent !important; backdrop-filter: none !important; }
+.ops-dark tr.bg-white:hover, .ops-dark tr.bg-gray-50\/60:hover { background-color: rgba(56, 189, 248, 0.06) !important; }
+.ops-dark .bg-gray-50\/50 { background-color: rgba(255,255,255,0.02) !important; }
+.ops-dark .border-gray-100, .ops-dark .border-gray-200, .ops-dark .border-gray-300 { border-color: rgba(148, 163, 184, 0.10) !important; }
 .ops-dark .border-b { border-bottom-color: rgba(148, 163, 184, 0.08) !important; }
 .ops-dark .border-t { border-top-color: rgba(148, 163, 184, 0.08) !important; }
 .ops-dark .divide-gray-100 > * + * { border-top-color: rgba(148, 163, 184, 0.08) !important; }
-
-/* -- Depth + top highlight for glass cards -- */
-.ops-dark .shadow-sm {
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35),
-              inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
-}
-
-/* -- Rounded corners -- */
+.ops-dark .shadow-sm { box-shadow: 0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.05) !important; }
 .ops-dark .rounded-lg { border-radius: 16px !important; }
 .ops-dark .rounded-md { border-radius: 10px !important; }
-
-/* -- Text -- */
 .ops-dark .text-gray-900 { color: #eaf2ff !important; }
 .ops-dark .text-gray-800 { color: #d0dff0 !important; }
 .ops-dark .text-gray-700 { color: #b3cadf !important; }
 .ops-dark .text-gray-600 { color: #8aa6c4 !important; }
 .ops-dark .text-gray-500 { color: #6e8cab !important; }
 .ops-dark .text-gray-400 { color: #51708d !important; }
-
-/* -- Hover states (non-row) -- */
-.ops-dark .hover\:bg-gray-50:hover,
-.ops-dark .hover\:bg-gray-100:hover,
-.ops-dark .hover\:bg-gray-200:hover { background-color: rgba(56, 189, 248, 0.08) !important; }
-
-/* -- Inputs, selects, textareas -- */
-.ops-dark input[type="date"],
-.ops-dark input[type="text"],
-.ops-dark input[type="search"],
-.ops-dark select,
-.ops-dark textarea {
-  background-color: rgba(8, 15, 28, 0.6) !important;
-  color: #cdddee !important;
-  border-color: rgba(148, 163, 184, 0.14) !important;
-  color-scheme: dark;
+.ops-dark .hover\:bg-gray-50:hover, .ops-dark .hover\:bg-gray-100:hover, .ops-dark .hover\:bg-gray-200:hover { background-color: rgba(56,189,248,0.08) !important; }
+.ops-dark input[type="date"], .ops-dark input[type="text"], .ops-dark input[type="search"], .ops-dark select, .ops-dark textarea {
+  background-color: rgba(8,15,28,0.6) !important; color: #cdddee !important; border-color: rgba(148,163,184,0.14) !important; color-scheme: dark;
 }
-.ops-dark input[type="date"]:focus,
-.ops-dark input[type="text"]:focus,
-.ops-dark select:focus {
-  border-color: #38bdf8 !important;
-  box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2) !important;
-  outline: none !important;
+.ops-dark input[type="date"]:focus, .ops-dark input[type="text"]:focus, .ops-dark select:focus {
+  border-color: #38bdf8 !important; box-shadow: 0 0 0 2px rgba(56,189,248,0.2) !important; outline: none !important;
 }
 .ops-dark input::placeholder { color: #51708d !important; }
 .ops-dark select option { background-color: #0d1626; color: #eaf2ff; }
-
-/* -- Progress bar tracks -- */
-.ops-dark .bg-gray-100.rounded-full,
-.ops-dark .bg-gray-100.h-1\.5 { background-color: rgba(255, 255, 255, 0.06) !important; }
-
-/* -- Badge backgrounds -- */
-.ops-dark .bg-green-100  { background-color: rgba(21,128,61,0.22) !important; }
-.ops-dark .bg-green-50   { background-color: rgba(21,128,61,0.12) !important; }
-.ops-dark .bg-red-100    { background-color: rgba(153,27,27,0.28) !important; }
-.ops-dark .bg-amber-100  { background-color: rgba(146,64,14,0.28) !important; }
+.ops-dark .bg-gray-100.rounded-full, .ops-dark .bg-gray-100.h-1\.5 { background-color: rgba(255,255,255,0.06) !important; }
+.ops-dark .bg-green-100 { background-color: rgba(21,128,61,0.22) !important; }
+.ops-dark .bg-green-50 { background-color: rgba(21,128,61,0.12) !important; }
+.ops-dark .bg-red-100 { background-color: rgba(153,27,27,0.28) !important; }
+.ops-dark .bg-amber-100 { background-color: rgba(146,64,14,0.28) !important; }
 .ops-dark .bg-yellow-100 { background-color: rgba(133,77,14,0.28) !important; }
-.ops-dark .bg-lime-100   { background-color: rgba(54,83,20,0.28) !important; }
+.ops-dark .bg-lime-100 { background-color: rgba(54,83,20,0.28) !important; }
 .ops-dark .bg-orange-100 { background-color: rgba(154,52,18,0.28) !important; }
-.ops-dark .bg-teal-100   { background-color: rgba(19,78,74,0.28) !important; }
+.ops-dark .bg-teal-100 { background-color: rgba(19,78,74,0.28) !important; }
 .ops-dark .bg-indigo-100 { background-color: rgba(55,48,163,0.28) !important; }
-
-/* -- Badge / accent text (current cyan + violet + semantic mix) -- */
 .ops-dark .text-green-700, .ops-dark .text-green-800 { color: #4ade80 !important; }
-.ops-dark .text-red-700,   .ops-dark .text-red-800   { color: #f87171 !important; }
+.ops-dark .text-red-700, .ops-dark .text-red-800 { color: #f87171 !important; }
 .ops-dark .text-amber-600, .ops-dark .text-amber-800 { color: #fbbf24 !important; }
 .ops-dark .text-yellow-800 { color: #fde047 !important; }
-.ops-dark .text-lime-800   { color: #a3e635 !important; }
+.ops-dark .text-lime-800 { color: #a3e635 !important; }
 .ops-dark .text-orange-800 { color: #fb923c !important; }
-.ops-dark .text-teal-800   { color: #2dd4bf !important; }
+.ops-dark .text-teal-800 { color: #2dd4bf !important; }
 .ops-dark .text-indigo-600 { color: #818cf8 !important; }
 .ops-dark .border-green-200 { border-color: rgba(21,128,61,0.4) !important; }
-
-/* -- Stat-card numbers stay white -- */
-.ops-dark .text-gray-900.text-2xl,
-.ops-dark .text-gray-900.text-3xl { color: #ffffff !important; }
-
-/* -- Scrollbar -- */
-.ops-dark::-webkit-scrollbar { width: 6px; }
-.ops-dark::-webkit-scrollbar-track { background: transparent; }
-.ops-dark::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.18); border-radius: 3px; }
-.ops-dark::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.3); }
-
-/* -- Pagination -- */
+.ops-dark .text-gray-900.text-2xl, .ops-dark .text-gray-900.text-3xl { color: #ffffff !important; }
 .ops-dark .border-gray-200.rounded { border-color: rgba(148,163,184,0.14) !important; }
 .ops-dark .disabled\:opacity-40:disabled { opacity: 0.25 !important; }
-
-/* -- Amber / red banners (not glass -- solid tint) -- */
-.ops-dark .bg-amber-50    { background-color: rgba(146,64,14,0.15) !important; }
+.ops-dark .bg-amber-50 { background-color: rgba(146,64,14,0.15) !important; }
 .ops-dark .border-amber-200 { border-color: rgba(146,64,14,0.4) !important; }
 .ops-dark .text-amber-500 { color: #f59e0b !important; }
-.ops-dark .bg-red-50      { background-color: rgba(153,27,27,0.15) !important; }
+.ops-dark .bg-red-50 { background-color: rgba(153,27,27,0.15) !important; }
 .ops-dark .border-red-200 { border-color: rgba(153,27,27,0.4) !important; }
