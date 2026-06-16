@@ -63,6 +63,41 @@ function complexityClass(v: string) {
   if (s.includes("below 5%"))                return "bg-red-500/15 text-red-700 dark:text-red-400";
   return "bg-muted text-muted-foreground";
 }
+// ── EC Status (per-group band -> level), mirrors the rule decided in the sheet ─
+const EC_STATUS: Record<"A" | "B", Record<string, "super" | "green" | "yellow" | "red">> = {
+  A: { "12% and above": "super", "9% - 11%": "green", "5% - 8%": "yellow", "below 5%": "red" },
+  B: { "above 9% (up to 10%+)": "super", "7% - 9%": "green", "3% - 6%": "yellow", "below 3%": "red" },
+};
+function normBand(s: string) {
+  return s.replace(/[\u2013\u2014]/g, "-").trim().toLowerCase().replace(/\s+/g, " ");
+}
+function ecLevel(group: string, complexity: string): "super" | "green" | "yellow" | "red" | null {
+  const table = EC_STATUS[String(group).includes("A") ? "A" : "B"];
+  const want = normBand(complexity);
+  for (const k in table) if (normBand(k) === want) return table[k];
+  return null;
+}
+const EC_PILL: Record<string, { label: string; cls: string }> = {
+  super:  { label: "Super Green", cls: "bg-emerald-500 text-white" },
+  green:  { label: "Green",       cls: "bg-green-600 text-white" },
+  yellow: { label: "Yellow",      cls: "bg-amber-500 text-white" },
+  red:    { label: "Red",         cls: "bg-red-500 text-white" },
+};
+function ecStatus(group: string, complexity: string): { label: string; cls: string } {
+  const level = ecLevel(group, complexity);
+  return level ? EC_PILL[level] : { label: "--", cls: "" };
+}
+// EC Complexity tint, group-aware (super = deeper solid green, distinct from green)
+const EC_TINT: Record<string, string> = {
+  super:  "bg-emerald-300 text-emerald-900",
+  green:  "bg-green-500/15 text-green-700 dark:text-green-400",
+  yellow: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
+  red:    "bg-red-500/15 text-red-700 dark:text-red-400",
+};
+function complexityClassFor(group: string, v: string): string {
+  const level = ecLevel(group, v);
+  return level && EC_TINT[level] ? EC_TINT[level] : complexityClass(v);
+}
 function qcClass(v: string) {
   const s = v.toLowerCase();
   if (s.includes("no qc") || s.includes("no issues")) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
@@ -505,16 +540,17 @@ export default function KPITab() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        {["Agent","Group","Email Vol.","FRT Count","Status","EC Complexity","QC Grade","Remarks"].map(h => (
+                        {["Agent","Group","FRT Count","FRT Status","Email Vol.","EC Complexity","EC Status","QC Grade","Remarks"].map(h => (
                           <TableHead key={h} className="whitespace-nowrap">{h}</TableHead>
                         ))}
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {data.individualPerformance.length === 0 ? (
-                        <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No data for selected period</TableCell></TableRow>
+                        <TableRow><TableCell colSpan={9} className="py-10 text-center text-muted-foreground">No data for selected period</TableCell></TableRow>
                       ) : data.individualPerformance.map((row, i) => {
                         const st = frtStatus(row.frtCount);
+                        const ec = ecStatus(row.complexityGroup, row.complexity);
                         return (
                           <TableRow key={i}>
                             <TableCell>
@@ -527,12 +563,15 @@ export default function KPITab() {
                               </div>
                             </TableCell>
                             <TableCell className="text-xs text-muted-foreground">{row.complexityGroup || "—"}</TableCell>
-                            <TableCell className="text-right font-semibold">{row.emailCount || "—"}</TableCell>
                             <TableCell className="font-medium">{row.frtCount || "—"}</TableCell>
                             <TableCell>
                               {st.label === "--" ? <span className="text-xs text-muted-foreground">—</span> : <Badge className={st.cls}>{st.label}</Badge>}
                             </TableCell>
-                            <TableCell><ColorBadge val={row.complexity} cls={complexityClass(row.complexity)} /></TableCell>
+                            <TableCell className="text-right font-semibold">{row.emailCount || "—"}</TableCell>
+                            <TableCell><ColorBadge val={row.complexity} cls={complexityClassFor(row.complexityGroup, row.complexity)} /></TableCell>
+                            <TableCell>
+                              {ec.label === "--" ? <span className="text-xs text-muted-foreground">—</span> : <Badge className={ec.cls}>{ec.label}</Badge>}
+                            </TableCell>
                             <TableCell><ColorBadge val={qcDisplay(row.quality)} cls={qcClass(row.quality)} /></TableCell>
                             <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground" title={row.remarks}>{row.remarks || "—"}</TableCell>
                           </TableRow>
