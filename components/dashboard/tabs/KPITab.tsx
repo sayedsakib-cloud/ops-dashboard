@@ -1,6 +1,16 @@
 "use client";
 import { useEffect, useState } from "react";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardAction } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 // Parse FRT string (e.g. "5h 3m", "36m", "1d 6h") to decimal hours
 function parseFrtHours(s: string): number {
@@ -14,10 +24,10 @@ function parseFrtHours(s: string): number {
 function frtStatus(frt: string): { label: string; cls: string } {
   const h = parseFrtHours(frt);
   if (h === Infinity) return { label: "--", cls: "" };
-  if (h <= 1) return { label: "Super Green", cls: "bg-emerald-400 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
-  if (h <= 2) return { label: "Green",       cls: "bg-green-500 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
-  if (h <= 4) return { label: "Yellow",      cls: "bg-amber-400 text-gray-900 text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
-  return       { label: "Red",          cls: "bg-red-400 text-white text-xs font-semibold px-3 py-1 rounded-full whitespace-nowrap" };
+  if (h <= 1) return { label: "Super Green", cls: "bg-emerald-500 text-white" };
+  if (h <= 2) return { label: "Green",       cls: "bg-green-600 text-white" };
+  if (h <= 4) return { label: "Yellow",      cls: "bg-amber-500 text-white" };
+  return       { label: "Red",          cls: "bg-red-500 text-white" };
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -43,40 +53,32 @@ type KPIData   = {
 };
 type BAUData = { headers: string[]; rows: string[][]; total: number; filtered: number };
 
-// ── Badge helpers ──────────────────────────────────────────────────────────
-function frtClass(v: string) {
-  const s = v.toLowerCase();
-  if (s.startsWith("under 2")) return "bg-green-100 text-green-800";
-  if (s.startsWith("2+"))      return "bg-teal-100 text-teal-800";
-  if (s.startsWith("3+"))      return "bg-amber-100 text-amber-800";
-  if (s.startsWith("4+"))      return "bg-red-100 text-red-800";
-  return "bg-gray-100 text-gray-600";
-}
+// ── Badge color helpers (dark-aware tokens, no .ops-dark dependency) ─────────
 function complexityClass(v: string) {
   const s = v.toLowerCase();
-  if (s.includes("12% and above"))            return "bg-green-100 text-green-800";
-  if (s.includes("above 9%"))                 return "bg-lime-100 text-lime-800";
-  if (s.includes("9%") && s.includes("11%")) return "bg-yellow-100 text-yellow-800";
-  if (s.includes("7%") || s.includes("8%"))  return "bg-orange-100 text-orange-800";
-  if (s.includes("below 5%"))                return "bg-red-100 text-red-800";
-  return "bg-gray-100 text-gray-600";
+  if (s.includes("12% and above"))           return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
+  if (s.includes("above 9%"))                return "bg-lime-500/15 text-lime-700 dark:text-lime-400";
+  if (s.includes("9%") && s.includes("11%")) return "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400";
+  if (s.includes("7%") || s.includes("8%"))  return "bg-orange-500/15 text-orange-700 dark:text-orange-400";
+  if (s.includes("below 5%"))                return "bg-red-500/15 text-red-700 dark:text-red-400";
+  return "bg-muted text-muted-foreground";
 }
 function qcClass(v: string) {
   const s = v.toLowerCase();
-  if (s.includes("no qc") || s.includes("no issues")) return "bg-green-50 text-green-700 border border-green-200";
-  if (s.includes("critical") || s.includes("refund"))  return "bg-red-100 text-red-800";
-  if (s.includes("major"))                              return "bg-orange-100 text-orange-800";
-  if (s.includes("1") && s.includes("error"))           return "bg-yellow-100 text-yellow-800";
-  return "bg-gray-100 text-gray-600";
+  if (s.includes("no qc") || s.includes("no issues")) return "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400";
+  if (s.includes("critical") || s.includes("refund"))  return "bg-red-500/15 text-red-700 dark:text-red-400";
+  if (s.includes("major"))                             return "bg-orange-500/15 text-orange-700 dark:text-orange-400";
+  if (s.includes("1") && s.includes("error"))          return "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400";
+  return "bg-muted text-muted-foreground";
 }
 function stakeholderClass(v: string) {
   const s = v.toLowerCase();
-  if (s.includes("3% or more")) return "bg-red-100 text-red-800";
-  if (s.includes("2%"))         return "bg-amber-100 text-amber-800";
-  return "bg-gray-100 text-gray-600";
+  if (s.includes("3% or more")) return "bg-red-500/15 text-red-700 dark:text-red-400";
+  if (s.includes("2%"))         return "bg-amber-500/15 text-amber-700 dark:text-amber-400";
+  return "bg-muted text-muted-foreground";
 }
 function qcDisplay(v: string) {
-  return v.toLowerCase().includes("no qc") ? "✓ No Issues" : (v || "—");
+  return v.toLowerCase().includes("no qc") ? "No Issues" : (v || "—");
 }
 
 // ── Shared UI helpers ──────────────────────────────────────────────────────
@@ -89,39 +91,28 @@ function avatarColor(name: string) {
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
   return PALETTE[Math.abs(h) % PALETTE.length];
 }
-function Avatar({ name }: { name: string }) {
+function AgentAvatar({ name }: { name: string }) {
   return (
-    <div className={`w-8 h-8 rounded-full flex items-center justify-center text-white text-sm font-bold flex-shrink-0 ${avatarColor(name)}`}>
-      {name.charAt(0).toUpperCase()}
-    </div>
+    <Avatar className="h-8 w-8">
+      <AvatarFallback className={cn("text-xs font-bold text-white", avatarColor(name))}>
+        {name.charAt(0).toUpperCase()}
+      </AvatarFallback>
+    </Avatar>
   );
 }
-function Badge({ val, cls }: { val: string; cls: string }) {
-  if (!val) return <span className="text-gray-400 text-xs">—</span>;
-  return <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}>{val}</span>;
+function ColorBadge({ val, cls }: { val: string; cls: string }) {
+  if (!val) return <span className="text-muted-foreground text-xs">—</span>;
+  return <Badge className={cls}>{val}</Badge>;
 }
 function StatCard({ icon, label, value }: { icon: string; label: string; value: string|number }) {
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
+    <Card className="gap-0 p-4">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span>{icon}</span>
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
+        <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</span>
       </div>
-      <div className="text-2xl font-bold text-gray-900">{value ?? "—"}</div>
-    </div>
-  );
-}
-function THead({ cols }: { cols: string[] }) {
-  return (
-    <thead>
-      <tr className="bg-gray-900 text-white">
-        {cols.map(c => (
-          <th key={c} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-            {c}
-          </th>
-        ))}
-      </tr>
-    </thead>
+      <div className="text-2xl font-bold">{value ?? "—"}</div>
+    </Card>
   );
 }
 function rankLabel(i: number) {
@@ -129,16 +120,34 @@ function rankLabel(i: number) {
   return `#${i + 1}`;
 }
 
+// Segmented control (controlled, keeps content mounted via parent display logic)
+function Segmented<T extends string>({ value, onChange, options }: {
+  value: T; onChange: (v: T) => void; options: { key: T; label: string }[];
+}) {
+  return (
+    <div className="inline-flex items-center gap-1 rounded-lg bg-muted p-1">
+      {options.map(({ key, label }) => (
+        <button key={key} onClick={() => onChange(key)}
+          className={cn(
+            "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+            value === key
+              ? "bg-background text-foreground shadow-sm"
+              : "text-muted-foreground hover:text-foreground",
+          )}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── BAU Section ────────────────────────────────────────────────────────────
-// Sub-tabs keep their data when switching between them (no reload on switch back)
 const PAGE_SIZE = 50;
 
 function BAUSection() {
   const [bauTab, setBauTab] = useState<"regular" | "hireflix">("regular");
-  // Track whether each sub-tab has ever been visited
   const [hirelixLoaded, setHirelixLoaded] = useState(false);
 
-  // ── Per sub-tab data (prevents re-fetch on switch back) ──────────────────
   const [regularData,    setRegularData]    = useState<BAUData | null>(null);
   const [regularLoading, setRegularLoading] = useState(false);
   const [regularError,   setRegularError]   = useState<string | null>(null);
@@ -175,19 +184,16 @@ function BAUSection() {
     finally { setLoading(false); }
   }
 
-  // Load regular tab on first mount
   useEffect(() => { loadTab("regular", "", "", ""); }, []);
 
   function switchBauTab(tab: "regular" | "hireflix") {
     setBauTab(tab);
-    // Only load hireflix the first time it's visited
     if (tab === "hireflix" && !hirelixLoaded) {
       setHirelixLoaded(true);
       loadTab("hireflix", "", "", "");
     }
   }
 
-  // Current tab helpers for the shared filter UI
   const isReg  = bauTab === "regular";
   const curFrom    = isReg ? regularFrom    : hirelixFrom;
   const curTo      = isReg ? regularTo      : hirelixTo;
@@ -204,28 +210,21 @@ function BAUSection() {
 
   function renderTable(data: BAUData | null, loading: boolean, error: string | null, page: number, setPage: (p: number) => void, totalLabel: string) {
     if (loading) return (
-      <div className="flex items-center justify-center py-8">
-        <span className="text-gray-400 text-sm animate-pulse">Loading...</span>
+      <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading...
       </div>
     );
     if (error) return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-3 text-red-700 text-sm">
+      <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
         Error: {error}
       </div>
     );
     if (!data) return null;
 
-    // Find name/agent column for by-name summary
     const nameIdx = data.headers.findIndex(h =>
       h.toLowerCase().includes("name") || h.toLowerCase().includes("agent")
     );
-    // Value column = the count column (Final Count / Initial Email Count).
-    // The API always returns it as the last column.
     const valueIdx = data.headers.findIndex(h => /count/i.test(h));
-
-    // Value column = the count column (Final Count / Initial Email Count).
-    // The API always returns it as the last column.
-    //const valueIdx = data.headers.findIndex(h => /count/i.test(h));
     const vIdx = valueIdx >= 0 ? valueIdx : data.headers.length - 1;
     const numOf = (v: string) => {
       const n = parseFloat(String(v ?? "").replace(/[^0-9.\-]/g, ""));
@@ -246,145 +245,117 @@ function BAUSection() {
 
     return (
       <div className="space-y-4">
-
         {/* Total count card */}
-        <div className="bg-white rounded-lg p-5 shadow-sm border border-gray-100 inline-block min-w-[220px]">
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{totalLabel}</p>
-          <p className="text-3xl font-bold text-gray-900">{grandTotal.toLocaleString()}</p>
-        </div>
+        <Card className="inline-block min-w-[220px] gap-0 p-5">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{totalLabel}</p>
+          <p className="text-3xl font-bold">{grandTotal.toLocaleString()}</p>
+        </Card>
 
-        {/* By-name summary table */}
+        {/* By-name summary */}
         {nameSummary.length > 0 ? (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100">
-              <p className="font-semibold text-gray-900 text-sm">Count by Name</p>
-              <p className="text-xs text-gray-400 mt-0.5">Filtered period totals per teammate</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-gray-900 text-white">
-                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-                      {nameIdx >= 0 ? data.headers[nameIdx] : "Name"}
-                    </th>
-                    <th className="px-4 py-3 text-right pr-10 text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-                      Count
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {nameSummary.map(([name, count], i) => (
-                    <tr key={name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                      <td className="px-4 py-2.5 font-medium text-gray-800">{name}</td>
-                      <td className="px-4 py-2.5 font-bold text-gray-900 text-right pr-10">{count.toLocaleString()}</td>
-                    </tr>
+          <Card className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b py-4">
+              <CardTitle className="text-sm">Count by Name</CardTitle>
+              <CardDescription className="text-xs">Filtered period totals per teammate</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>{nameIdx >= 0 ? data.headers[nameIdx] : "Name"}</TableHead>
+                    <TableHead className="pr-10 text-right">Count</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {nameSummary.map(([name, count]) => (
+                    <TableRow key={name}>
+                      <TableCell className="font-medium">{name}</TableCell>
+                      <TableCell className="pr-10 text-right font-bold">{count.toLocaleString()}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         ) : null}
 
         {/* Collapsible full records */}
         <details className="group">
-          <summary className="bg-white rounded-lg shadow-sm border border-gray-100 px-5 py-3 flex items-center justify-between cursor-pointer list-none hover:bg-gray-50 transition-colors select-none">
-            <span className="text-sm font-semibold text-gray-800">
-              View all records ({data.filtered.toLocaleString()} of {data.total.toLocaleString()})
-            </span>
-            <ChevronDown className="w-4 h-4 text-gray-400" />
+          <summary className="flex cursor-pointer list-none select-none items-center justify-between rounded-lg border bg-card px-5 py-3 text-sm font-semibold transition-colors hover:bg-accent">
+            <span>View all records ({data.filtered.toLocaleString()} of {data.total.toLocaleString()})</span>
+            <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
           </summary>
-          <div className="mt-2 bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
+          <Card className="mt-2 gap-0 overflow-hidden py-0">
             {totalPages > 1 ? (
-              <div className="px-5 py-2 border-b border-gray-100 flex items-center justify-end gap-2 text-sm text-gray-600">
-                <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}
-                  className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
-                  {"<"}
-                </button>
+              <div className="flex items-center justify-end gap-2 border-b px-5 py-2 text-sm text-muted-foreground">
+                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1}>{"<"}</Button>
                 <span className="text-xs">Page {page} / {totalPages}</span>
-                <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}
-                  className="w-7 h-7 flex items-center justify-center rounded border border-gray-200 disabled:opacity-40 hover:bg-gray-50">
-                  {">"}
-                </button>
+                <Button variant="outline" size="icon" className="h-7 w-7" onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages}>{">"}</Button>
               </div>
             ) : null}
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <THead cols={data.headers} />
-                <tbody>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {data.headers.map(h => <TableHead key={h} className="whitespace-nowrap">{h}</TableHead>)}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {pagedRows.length === 0 ? (
-                    <tr><td colSpan={data.headers.length} className="px-4 py-8 text-center text-gray-400">No records found</td></tr>
+                    <TableRow><TableCell colSpan={data.headers.length} className="py-8 text-center text-muted-foreground">No records found</TableCell></TableRow>
                   ) : pagedRows.map((row, i) => (
-                    <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
+                    <TableRow key={i}>
                       {row.map((cell, j) => (
-                        <td key={j} className="px-4 py-2.5 text-gray-700 whitespace-nowrap text-sm">
-                          {cell || "—"}
-                        </td>
+                        <TableCell key={j} className="whitespace-nowrap">{cell || "—"}</TableCell>
                       ))}
-                    </tr>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </details>
-
       </div>
     );
   }
 
   return (
     <div className="space-y-4">
-      {/* Sub-tab buttons */}
-      <div className="flex gap-1 border-b border-gray-200">
-        {([
+      <Segmented
+        value={bauTab}
+        onChange={switchBauTab}
+        options={[
           { key: "regular",  label: "📋 Regular Task Report" },
-          { key: "hireflix", label: "🎯 Hireflix Count"       },
-        ] as const).map(({ key, label }) => (
-          <button key={key} onClick={() => switchBauTab(key)}
-            className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px ${
-              bauTab === key
-                ? "border-indigo-600 text-indigo-600"
-                : "border-transparent text-gray-500 hover:text-gray-800 hover:border-gray-300"
-            }`}>
-            {label}
-          </button>
-        ))}
-      </div>
+          { key: "hireflix", label: "🎯 Hireflix Count" },
+        ]}
+      />
 
       {/* Shared filter bar */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
-        <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">📅 Date Range Filter</p>
+      <Card className="gap-0 p-4">
+        <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">📅 Date Range Filter</p>
         <div className="flex flex-wrap items-end gap-4">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">From date</label>
-            <input type="date" value={curFrom} onChange={e => setCurFrom(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">From date</Label>
+            <Input type="date" value={curFrom} onChange={e => setCurFrom(e.target.value)} className="w-auto" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">To date</label>
-            <input type="date" value={curTo} onChange={e => setCurTo(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">To date</Label>
+            <Input type="date" value={curTo} onChange={e => setCurTo(e.target.value)} className="w-auto" />
           </div>
-          <div className="flex-1 min-w-[180px]">
-            <label className="block text-xs text-gray-500 mb-1">Filter by name</label>
-            <input type="text" value={curName} onChange={e => setCurName(e.target.value)}
+          <div className="min-w-[180px] flex-1 space-y-1">
+            <Label className="text-xs text-muted-foreground">Filter by name</Label>
+            <Input
+              type="text" value={curName} onChange={e => setCurName(e.target.value)}
               onKeyDown={e => e.key === "Enter" && handleApply()}
-              placeholder="All agents…"
-              className="w-full border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+              placeholder="All agents..."
+            />
           </div>
-          <button onClick={handleApply}
-            className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors">
-            Apply
-          </button>
-          <button onClick={handleReset}
-            className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 transition-colors">
-            Reset
-          </button>
+          <Button onClick={handleApply}>Apply</Button>
+          <Button variant="secondary" onClick={handleReset}>Reset</Button>
         </div>
-        <p className="text-xs text-gray-400 mt-2">Filtering on column: Date</p>
-      </div>
+        <p className="mt-2 text-xs text-muted-foreground">Filtering on column: Date</p>
+      </Card>
 
-      {/* Sub-tab content — keep-mounted with inline style toggle */}
       <div style={{ display: bauTab === "regular" ? "block" : "none" }}>
         {renderTable(regularData, regularLoading, regularError, regularPage, setRegularPage, "Total Task Count")}
       </div>
@@ -400,7 +371,6 @@ export default function KPITab() {
   const [section,        setSection]        = useState<"kpi" | "bau">("kpi");
   const [bauEverMounted, setBauEverMounted] = useState(false);
 
-  // KPI data state
   const [data,     setData]    = useState<KPIData | null>(null);
   const [loading,  setLoading] = useState(true);
   const [error,    setError]   = useState<string | null>(null);
@@ -435,13 +405,11 @@ export default function KPITab() {
 
   useEffect(() => { loadKPI(); }, []);
 
-  // Handle section toggle — lazy-mount BAU
   function handleSectionSwitch(s: "kpi" | "bau") {
     setSection(s);
     if (s === "bau") setBauEverMounted(true);
   }
 
-  // Quarterly leaderboard
   const qtrAgents = (data?.quarterly.agents ?? [])
     .map(a => ({ ...a, score: a[quarter as "Q2"|"Q3"|"Q4"] }))
     .filter(a => a.score !== null)
@@ -453,222 +421,185 @@ export default function KPITab() {
 
   return (
     <div className="space-y-5">
-
-      {/* ── Top section toggle ── */}
-      <div className="flex gap-2">
-        {([
+      <Segmented
+        value={section}
+        onChange={handleSectionSwitch}
+        options={[
           { key: "kpi", label: "CR Pax KPI DB & CR Team KPI DB" },
-          { key: "bau", label: "CR BAU"                          },
-        ] as const).map(({ key, label }) => (
-          <button key={key} onClick={() => handleSectionSwitch(key)}
-            className={`px-4 py-2 text-sm font-semibold rounded-md transition-colors ${
-              section === key
-                ? "bg-indigo-600 text-white shadow-sm"
-                : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-            }`}>
-            {label}
-          </button>
-        ))}
-      </div>
+          { key: "bau", label: "CR BAU" },
+        ]}
+      />
 
-      {/* ── CR BAU — lazy-mount, then keep alive ── */}
+      {/* CR BAU — lazy-mount, then keep alive */}
       <div style={{ display: section === "bau" ? "block" : "none" }}>
         {bauEverMounted && <BAUSection />}
       </div>
 
-      {/* ── KPI content — always mounted (default section) ── */}
+      {/* KPI content */}
       <div style={{ display: section === "kpi" ? "block" : "none" }}>
-
         {loading && (
-          <div className="flex items-center justify-center h-64">
-            <span className="text-gray-400 text-sm animate-pulse">Loading KPI data…</span>
+          <div className="flex h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin" /> Loading KPI data...
           </div>
         )}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
+          <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
             Error: {error}
           </div>
         )}
 
         {!loading && !error && data && (
           <div className="space-y-8">
-
             {/* ══ SECTION 1 ══ */}
             <section className="space-y-4">
-
               {/* Filter bar */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-100 p-4">
-                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">📅 Date Range Filter</p>
+              <Card className="gap-0 p-4">
+                <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">📅 Date Range Filter</p>
                 <div className="flex flex-wrap items-end gap-4">
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">From (week start)</label>
-                    <input type="date" value={fromDate} onChange={e => setFrom(e.target.value)}
-                      className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">From (week start)</Label>
+                    <Input type="date" value={fromDate} onChange={e => setFrom(e.target.value)} className="w-auto" />
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">To (week end)</label>
-                    <input type="date" value={toDate} onChange={e => setTo(e.target.value)}
-                      className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">To (week end)</Label>
+                    <Input type="date" value={toDate} onChange={e => setTo(e.target.value)} className="w-auto" />
                   </div>
-                  <div>
-                    <label className="block text-xs text-gray-500 mb-1">Filter by agent name</label>
-                    <select value={agent} onChange={e => setAgent(e.target.value)}
-                      className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none min-w-[140px]">
-                      <option value="all">All agents…</option>
-                      {data.allAgents.map(a => <option key={a} value={a}>{a}</option>)}
-                    </select>
+                  <div className="space-y-1">
+                    <Label className="text-xs text-muted-foreground">Filter by agent name</Label>
+                    <Select value={agent} onValueChange={setAgent}>
+                      <SelectTrigger className="min-w-[160px]"><SelectValue placeholder="All agents..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All agents...</SelectItem>
+                        {data.allAgents.map(a => <SelectItem key={a} value={a}>{a}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
                   </div>
-                  <button onClick={() => loadKPI(fromDate, toDate, agent)}
-                    className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 transition-colors">
-                    Apply
-                  </button>
-                  <button onClick={() => { setAgent("all"); loadKPI(); }}
-                    className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 transition-colors">
-                    Reset
-                  </button>
+                  <Button onClick={() => loadKPI(fromDate, toDate, agent)}>Apply</Button>
+                  <Button variant="secondary" onClick={() => { setAgent("all"); loadKPI(); }}>Reset</Button>
                 </div>
                 {data.filterStart && data.filterEnd && (
-                  <p className="text-xs text-gray-400 mt-3">
-                    Showing: <span className="font-medium text-gray-600">{data.filterStart}</span>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    Showing: <span className="font-medium text-foreground">{data.filterStart}</span>
                     {" to "}
-                    <span className="font-medium text-gray-600">{data.filterEnd}</span>
+                    <span className="font-medium text-foreground">{data.filterEnd}</span>
                   </p>
                 )}
-              </div>
+              </Card>
 
               {/* Summary cards */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-                <StatCard icon="📧" label="Total Email Volume"
-                  value={data.summary.totalEmailVolume.toLocaleString()} />
-                <StatCard icon="⭐" label="Avg Neg. Review %"
-                  value={data.summary.avgNegReview !== null ? `${data.summary.avgNegReview}%` : "—"} />
-                <StatCard icon="📝" label="TP Reviews Count"
-                  value={data.summary.tpReviewsCount} />
-                <StatCard icon="👥" label="Agents Active"
-                  value={data.summary.agentsActive} />
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+                <StatCard icon="📧" label="Total Email Volume" value={data.summary.totalEmailVolume.toLocaleString()} />
+                <StatCard icon="⭐" label="Avg Neg. Review %" value={data.summary.avgNegReview !== null ? `${data.summary.avgNegReview}%` : "—"} />
+                <StatCard icon="📝" label="TP Reviews Count" value={data.summary.tpReviewsCount} />
+                <StatCard icon="👥" label="Agents Active" value={data.summary.agentsActive} />
               </div>
 
               {/* Individual performance table */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">Individual Weekly Performance</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Metrics by agent - CR Pax KPI DB</p>
-                  </div>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
-                    {data.individualPerformance.length} agents
-                  </span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <THead cols={["Agent","Group","Email Vol.","FRT Count","Status","EC Complexity","QC Grade","Remarks"]} />
-                    <tbody>
+              <Card className="gap-0 overflow-hidden py-0">
+                <CardHeader className="border-b py-4">
+                  <CardTitle className="text-sm">Individual Weekly Performance</CardTitle>
+                  <CardDescription className="text-xs">Metrics by agent - CR Pax KPI DB</CardDescription>
+                  <CardAction><Badge variant="secondary">{data.individualPerformance.length} agents</Badge></CardAction>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {["Agent","Group","Email Vol.","FRT Count","Status","EC Complexity","QC Grade","Remarks"].map(h => (
+                          <TableHead key={h} className="whitespace-nowrap">{h}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {data.individualPerformance.length === 0 ? (
-                        <tr><td colSpan={8} className="px-4 py-10 text-center text-gray-400">No data for selected period</td></tr>
+                        <TableRow><TableCell colSpan={8} className="py-10 text-center text-muted-foreground">No data for selected period</TableCell></TableRow>
                       ) : data.individualPerformance.map((row, i) => {
                         const st = frtStatus(row.frtCount);
                         return (
-                          <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                            <td className="px-4 py-3">
+                          <TableRow key={i}>
+                            <TableCell>
                               <div className="flex items-center gap-2">
-                                <Avatar name={row.name} />
+                                <AgentAvatar name={row.name} />
                                 <div>
-                                  <div className="font-medium text-gray-900 text-sm">{row.name}</div>
-                                  <div className="text-xs text-gray-400">{row.quarter}</div>
+                                  <div className="text-sm font-medium">{row.name}</div>
+                                  <div className="text-xs text-muted-foreground">{row.quarter}</div>
                                 </div>
                               </div>
-                            </td>
-                            <td className="px-4 py-3 text-xs text-gray-600">{row.complexityGroup || "—"}</td>
-                            <td className="px-4 py-3 text-right font-semibold text-gray-900">{row.emailCount || "—"}</td>
-                            <td className="px-4 py-3 font-medium text-gray-700">{row.frtCount || "—"}</td>
-                            <td className="px-4 py-3">
-                              {st.label === "--" ? (
-                                <span className="text-gray-400 text-xs">—</span>
-                              ) : (
-                                <span className={st.cls}>{st.label}</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3"><Badge val={row.complexity} cls={complexityClass(row.complexity)} /></td>
-                            <td className="px-4 py-3"><Badge val={qcDisplay(row.quality)} cls={qcClass(row.quality)} /></td>
-                            <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate" title={row.remarks}>
-                              {row.remarks || "—"}
-                            </td>
-                          </tr>
+                            </TableCell>
+                            <TableCell className="text-xs text-muted-foreground">{row.complexityGroup || "—"}</TableCell>
+                            <TableCell className="text-right font-semibold">{row.emailCount || "—"}</TableCell>
+                            <TableCell className="font-medium">{row.frtCount || "—"}</TableCell>
+                            <TableCell>
+                              {st.label === "--" ? <span className="text-xs text-muted-foreground">—</span> : <Badge className={st.cls}>{st.label}</Badge>}
+                            </TableCell>
+                            <TableCell><ColorBadge val={row.complexity} cls={complexityClass(row.complexity)} /></TableCell>
+                            <TableCell><ColorBadge val={qcDisplay(row.quality)} cls={qcClass(row.quality)} /></TableCell>
+                            <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground" title={row.remarks}>{row.remarks || "—"}</TableCell>
+                          </TableRow>
                         );
                       })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
 
               {/* Team KPI table */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">Team KPI DB Summary</p>
-                    <p className="text-xs text-gray-400 mt-0.5">High-level operations monitoring - CR Team KPI DB</p>
-                  </div>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
-                    {data.teamKPI.length} records
-                  </span>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <THead cols={["Period","QTR","Neg. Review %","TP Reviews","Stakeholder Mgmt","Remarks"]} />
-                    <tbody>
+              <Card className="gap-0 overflow-hidden py-0">
+                <CardHeader className="border-b py-4">
+                  <CardTitle className="text-sm">Team KPI DB Summary</CardTitle>
+                  <CardDescription className="text-xs">High-level operations monitoring - CR Team KPI DB</CardDescription>
+                  <CardAction><Badge variant="secondary">{data.teamKPI.length} records</Badge></CardAction>
+                </CardHeader>
+                <CardContent className="p-0">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        {["Period","QTR","Neg. Review %","TP Reviews","Stakeholder Mgmt","Remarks"].map(h => (
+                          <TableHead key={h} className="whitespace-nowrap">{h}</TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                       {data.teamKPI.length === 0 ? (
-                        <tr><td colSpan={6} className="px-4 py-10 text-center text-gray-400">No data for selected period</td></tr>
+                        <TableRow><TableCell colSpan={6} className="py-10 text-center text-muted-foreground">No data for selected period</TableCell></TableRow>
                       ) : data.teamKPI.map((row, i) => (
-                        <tr key={i} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                          <td className="px-4 py-3 font-medium text-gray-800">{row.weekStart}{" to "}{row.weekEnd}</td>
-                          <td className="px-4 py-3 text-gray-600 font-medium">{row.quarter}</td>
-                          <td className="px-4 py-3">
-                            <span className={`font-semibold ${parseFloat(row.negReviewPct) >= 3 ? "text-red-600" : "text-amber-600"}`}>
+                        <TableRow key={i}>
+                          <TableCell className="font-medium">{row.weekStart}{" to "}{row.weekEnd}</TableCell>
+                          <TableCell className="font-medium text-muted-foreground">{row.quarter}</TableCell>
+                          <TableCell>
+                            <span className={cn("font-semibold", parseFloat(row.negReviewPct) >= 3 ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400")}>
                               {row.negReviewPct || "—"}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 font-semibold text-gray-900">{row.totalReviews || "—"}</td>
-                          <td className="px-4 py-3">
-                            <Badge val={row.stakeholderMgmt} cls={stakeholderClass(row.stakeholderMgmt)} />
-                          </td>
-                          <td className="px-4 py-3 text-xs text-gray-500 max-w-[200px] truncate" title={row.remarks}>
-                            {row.remarks || "—"}
-                          </td>
-                        </tr>
+                          </TableCell>
+                          <TableCell className="font-semibold">{row.totalReviews || "—"}</TableCell>
+                          <TableCell><ColorBadge val={row.stakeholderMgmt} cls={stakeholderClass(row.stakeholderMgmt)} /></TableCell>
+                          <TableCell className="max-w-[200px] truncate text-xs text-muted-foreground" title={row.remarks}>{row.remarks || "—"}</TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+                    </TableBody>
+                  </Table>
+                </CardContent>
+              </Card>
             </section>
 
-            <div className="border-t border-gray-200" />
+            <Separator />
 
             {/* ══ SECTION 2: CR Quarterly Avg. Points ══ */}
             <section className="space-y-4">
-              <h2 className="text-sm font-bold text-gray-700 uppercase tracking-widest">
-                CR Quarterly Avg. Points
-              </h2>
+              <h2 className="text-sm font-bold uppercase tracking-widest text-muted-foreground">CR Quarterly Avg. Points</h2>
 
               {/* Quarter pills */}
               <div className="flex gap-2">
-                {(data.quarterly.availableQuarters.length > 0
-                  ? data.quarterly.availableQuarters
-                  : ["Q2","Q3","Q4"]
-                ).map(q => (
-                  <button key={q} onClick={() => setQuarter(q)}
-                    className={`px-5 py-1.5 rounded-full text-sm font-semibold transition-colors ${
-                      quarter === q
-                        ? "bg-indigo-600 text-white shadow-sm"
-                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-                    }`}>
+                {(data.quarterly.availableQuarters.length > 0 ? data.quarterly.availableQuarters : ["Q2","Q3","Q4"]).map(q => (
+                  <Button key={q} size="sm" variant={quarter === q ? "default" : "secondary"}
+                    className="rounded-full" onClick={() => setQuarter(q)}>
                     {q}
-                  </button>
+                  </Button>
                 ))}
               </div>
 
               {/* Quarterly summary */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
                 <StatCard icon="👥" label="Agents Tracked" value={qtrAgents.length} />
                 <StatCard icon="📊" label="Average Score"  value={qtrAvg || "—"} />
                 <StatCard icon="🏆" label="Highest Score"  value={qtrMax || "—"} />
@@ -676,56 +607,46 @@ export default function KPITab() {
               </div>
 
               {/* Leaderboard */}
-              <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-                <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
-                  <div>
-                    <p className="font-semibold text-gray-900 text-sm">Agent Points — {quarter}</p>
-                    <p className="text-xs text-gray-400 mt-0.5">Average performance scores - {quarter}</p>
-                  </div>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
-                    {qtrAgents.length} agents
-                  </span>
-                </div>
-                <div className="grid grid-cols-12 bg-gray-900 text-white px-5 py-2.5 text-xs font-semibold uppercase tracking-wide">
+              <Card className="gap-0 overflow-hidden py-0">
+                <CardHeader className="border-b py-4">
+                  <CardTitle className="text-sm">Agent Points — {quarter}</CardTitle>
+                  <CardDescription className="text-xs">Average performance scores - {quarter}</CardDescription>
+                  <CardAction><Badge variant="secondary">{qtrAgents.length} agents</Badge></CardAction>
+                </CardHeader>
+                <div className="grid grid-cols-12 bg-muted/50 px-5 py-2.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   <div className="col-span-1">Rank</div>
                   <div className="col-span-3">Agent</div>
                   <div className="col-span-8">Score</div>
                 </div>
                 {qtrAgents.length === 0 ? (
-                  <div className="px-5 py-10 text-center text-gray-400 text-sm">No data for {quarter}</div>
+                  <div className="px-5 py-10 text-center text-sm text-muted-foreground">No data for {quarter}</div>
                 ) : qtrAgents.map((a, i) => {
                   const score = a.score ?? 0;
                   const top3  = i < 3;
                   return (
-                    <div key={a.name}
-                      className={`grid grid-cols-12 items-center px-5 py-4 border-b border-gray-50 last:border-0 ${
-                        i % 2 === 0 ? "bg-white" : "bg-gray-50/50"
-                      }`}>
-                      <div className="col-span-1 text-sm font-bold text-gray-600">{rankLabel(i)}</div>
+                    <div key={a.name} className="grid grid-cols-12 items-center border-b px-5 py-4 last:border-0">
+                      <div className="col-span-1 text-sm font-bold text-muted-foreground">{rankLabel(i)}</div>
                       <div className="col-span-3 flex items-center gap-2">
-                        <Avatar name={a.name} />
+                        <AgentAvatar name={a.name} />
                         <div>
-                          <div className="font-semibold text-gray-900 text-sm">{a.name}</div>
-                          <div className="text-xs text-gray-400">{quarter}</div>
+                          <div className="text-sm font-semibold">{a.name}</div>
+                          <div className="text-xs text-muted-foreground">{quarter}</div>
                         </div>
                       </div>
                       <div className="col-span-8 flex items-center gap-3">
-                        <span className={`text-base font-bold w-12 text-right ${top3 ? "text-indigo-600" : "text-amber-600"}`}>
+                        <span className={cn("w-12 text-right text-base font-bold", top3 ? "text-primary" : "text-amber-600 dark:text-amber-400")}>
                           {score.toFixed(2)}
                         </span>
-                        <div className="flex-1 bg-gray-100 rounded-full h-2.5 overflow-hidden">
-                          <div
-                            className={`h-2.5 rounded-full transition-all duration-500 ${top3 ? "bg-indigo-500" : "bg-amber-400"}`}
-                            style={{ width: `${Math.min((score / 3) * 100, 100)}%` }}
-                          />
+                        <div className="h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div className={cn("h-full rounded-full transition-all duration-500", top3 ? "bg-primary" : "bg-amber-500")}
+                            style={{ width: `${Math.min((score / 3) * 100, 100)}%` }} />
                         </div>
                       </div>
                     </div>
                   );
                 })}
-              </div>
+              </Card>
             </section>
-
           </div>
         )}
       </div>
