@@ -262,7 +262,16 @@ function BAUSection() {
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
-                <THead cols={[nameIdx >= 0 ? data.headers[nameIdx] : "Name", "Count"]} />
+                <thead>
+                  <tr className="bg-gray-900 text-white">
+                    <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
+                      {nameIdx >= 0 ? data.headers[nameIdx] : "Name"}
+                    </th>
+                    <th className="px-4 py-3 text-right pr-10 text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
+                      Count
+                    </th>
+                  </tr>
+                </thead>
                 <tbody>
                   {nameSummary.map(([name, count], i) => (
                     <tr key={name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
