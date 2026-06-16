@@ -1,5 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
+import { Loader2, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentRow = {
@@ -24,7 +32,7 @@ type TeepData = {
   agents: AgentRow[];
 };
 
-// ── Avatar ─────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────
 const PALETTE = [
   "bg-indigo-500","bg-purple-500","bg-pink-500","bg-blue-500",
   "bg-teal-500","bg-emerald-500","bg-orange-500","bg-rose-500",
@@ -34,85 +42,75 @@ function avatarColor(name: string) {
   for (let i = 0; i < name.length; i++) h = name.charCodeAt(i) + ((h << 5) - h);
   return PALETTE[Math.abs(h) % PALETTE.length];
 }
-function Avatar({ name, size = "sm" }: { name: string; size?: "sm" | "xs" }) {
-  const cls = size === "xs" ? "w-6 h-6 text-xs" : "w-7 h-7 text-sm";
+function AgentAvatar({ name, size = "sm" }: { name: string; size?: "sm" | "xs" }) {
+  const cls = size === "xs" ? "h-6 w-6 text-xs" : "h-7 w-7 text-sm";
   return (
-    <div className={`${cls} ${avatarColor(name)} rounded-full flex items-center justify-center text-white font-bold flex-shrink-0`}>
-      {name.charAt(0).toUpperCase()}
-    </div>
+    <Avatar className={cls}>
+      <AvatarFallback className={cn("font-bold text-white", avatarColor(name))}>{name.charAt(0).toUpperCase()}</AvatarFallback>
+    </Avatar>
   );
 }
+function slaText(rate: number) {
+  return rate >= 80 ? "text-emerald-600 dark:text-emerald-400"
+       : rate >= 60 ? "text-amber-600 dark:text-amber-400"
+       : "text-red-600 dark:text-red-400";
+}
+function slaBarColor(rate: number) {
+  return rate >= 80 ? "bg-emerald-500" : rate >= 60 ? "bg-amber-500" : "bg-red-500";
+}
 
-// ── Info tooltip ────────────────────────────────────────────────────────────
+// Info tooltip (native title)
 function Tip({ text }: { text: string }) {
   return (
-    <span
-      title={text}
-      className="inline-flex w-4 h-4 rounded-full bg-blue-500 text-white items-center justify-center text-xs font-bold cursor-help ml-1 hover:bg-blue-600 transition-colors flex-shrink-0 align-middle"
-    >
+    <span title={text}
+      className="ml-1 inline-flex h-4 w-4 flex-shrink-0 cursor-help items-center justify-center rounded-full bg-blue-500 align-middle text-xs font-bold text-white transition-colors hover:bg-blue-600">
       i
     </span>
   );
 }
 
-// ── Summary card ────────────────────────────────────────────────────────────
-function Card({
-  label, tip, value, valueColor, sub, children,
-}: {
+function SummaryCard({ label, tip, value, valueColor, sub, children }: {
   label: string; tip?: string; value?: string | number;
   valueColor?: string; sub?: string; children?: React.ReactNode;
 }) {
   return (
-    <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-100">
-      <div className="flex items-center gap-0.5 mb-2">
-        <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">{label}</span>
+    <Card className="gap-0 p-4">
+      <div className="mb-2 flex items-center gap-0.5">
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
         {tip ? <Tip text={tip} /> : null}
       </div>
-      {value !== undefined ? (
-        <p className={`text-2xl font-bold ${valueColor ?? "text-gray-900"}`}>{value}</p>
-      ) : null}
-      {sub ? <p className="text-xs text-gray-400 mt-1">{sub}</p> : null}
+      {value !== undefined ? <p className={cn("text-2xl font-bold", valueColor ?? "text-foreground")}>{value}</p> : null}
+      {sub ? <p className="mt-1 text-xs text-muted-foreground">{sub}</p> : null}
       {children}
-    </div>
+    </Card>
   );
 }
 
-// ── SLA bar ─────────────────────────────────────────────────────────────────
 function SlaBar({ rate }: { rate: number }) {
-  const color = rate >= 80 ? "bg-green-500" : rate >= 60 ? "bg-amber-400" : "bg-red-500";
-  const text  = rate >= 80 ? "text-green-600" : rate >= 60 ? "text-amber-600" : "text-red-600";
   return (
-    <div className="flex items-center gap-2 mt-1">
-      <div className="flex-1 bg-gray-100 rounded-full h-1.5 overflow-hidden">
-        <div className={`h-1.5 rounded-full ${color}`} style={{ width: `${Math.min(rate, 100)}%` }} />
+    <div className="mt-1 flex items-center gap-2">
+      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-1.5 rounded-full", slaBarColor(rate))} style={{ width: `${Math.min(rate, 100)}%` }} />
       </div>
-      <span className={`text-xs font-bold ${text}`}>{rate}%</span>
+      <span className={cn("text-xs font-bold", slaText(rate))}>{rate}%</span>
     </div>
   );
 }
 
-// ── Table header ────────────────────────────────────────────────────────────
 type ColSpec = { label: string; tip?: string };
-function TH({ cols }: { cols: Array<string | ColSpec> }) {
+function HeadRow({ cols }: { cols: Array<string | ColSpec> }) {
   return (
-    <thead>
-      <tr className="bg-gray-900 text-white">
-        {cols.map(col => {
-          const lbl = typeof col === "string" ? col : col.label;
-          const tip = typeof col === "string" ? undefined : col.tip;
-          return (
-            <th key={lbl} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide whitespace-nowrap">
-              {tip ? (
-                <span className="inline-flex items-center gap-1">
-                  {lbl}
-                  <Tip text={tip} />
-                </span>
-              ) : lbl}
-            </th>
-          );
-        })}
-      </tr>
-    </thead>
+    <TableRow>
+      {cols.map(col => {
+        const lbl = typeof col === "string" ? col : col.label;
+        const tip = typeof col === "string" ? undefined : col.tip;
+        return (
+          <TableHead key={lbl} className="whitespace-nowrap">
+            {tip ? <span className="inline-flex items-center gap-1">{lbl}<Tip text={tip} /></span> : lbl}
+          </TableHead>
+        );
+      })}
+    </TableRow>
   );
 }
 
@@ -142,7 +140,7 @@ export default function TradingEthicsTab() {
 
   const s = data?.summary;
 
-  const TIP_CLOSED     = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured — typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
+  const TIP_CLOSED     = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured - typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
   const TIP_FRT        = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only.";
   const TIP_HANDLING   = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
   const TIP_REPLIED_HR = "Conversations replied to divided by number of working days (Mon-Fri) in the period. NOT the same as Intercom's Conv. Replied / Active Hr which uses actual logged-in status time.";
@@ -150,184 +148,177 @@ export default function TradingEthicsTab() {
 
   return (
     <div className="space-y-5">
-
       {/* Header */}
-      <div className="bg-white rounded-lg shadow-sm px-6 py-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4">
+      <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-gray-900">Trading Ethics Email Performance</h1>
-          <p className="text-xs text-gray-400 mt-0.5">Channel: Email - Team: All CR inboxes - Timezone: GMT+6</p>
+          <h1 className="text-xl font-bold">Trading Ethics Email Performance</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">Channel: Email - Team: All CR inboxes - Timezone: GMT+6</p>
         </div>
         <div className="flex flex-wrap items-end gap-3">
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">From</label>
-            <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">From</Label>
+            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="w-auto" />
           </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">To</label>
-            <input type="date" value={to} onChange={e => setTo(e.target.value)}
-              className="border border-gray-300 rounded-md px-3 py-1.5 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" />
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">To</Label>
+            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="w-auto" />
           </div>
-          <button onClick={() => load(from, to)} disabled={loading}
-            className="px-4 py-1.5 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700 disabled:opacity-60 transition-colors">
-            {loading ? "Loading..." : "Apply"}
-          </button>
-          <button onClick={() => { setFrom(""); setTo(""); load(); }} disabled={loading}
-            className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 disabled:opacity-60 transition-colors">
-            Reset
-          </button>
+          <Button onClick={() => load(from, to)} disabled={loading}>
+            {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Loading</> : "Apply"}
+          </Button>
+          <Button variant="secondary" onClick={() => { setFrom(""); setTo(""); load(); }} disabled={loading}>Reset</Button>
         </div>
-      </div>
+      </Card>
 
       {/* Loading */}
       {loading ? (
         <div className="flex items-center justify-center py-16">
           <div className="text-center">
-            <div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin mb-3" />
-            <p className="text-gray-500 text-sm">Fetching email conversations from Intercom...</p>
+            <Loader2 className="mx-auto mb-3 h-8 w-8 animate-spin text-primary" />
+            <p className="text-sm text-muted-foreground">Fetching email conversations from Intercom...</p>
           </div>
         </div>
       ) : null}
 
       {error ? (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
+        <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           <strong>Error:</strong> {error}
         </div>
       ) : null}
 
       {!loading && s ? (
         <div className="space-y-5">
-
           {/* Summary cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-            <Card label="Emails Closed" tip={TIP_CLOSED}
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            <SummaryCard label="Emails Closed" tip={TIP_CLOSED}
               value={s.totalClosed.toLocaleString()}
               sub={"Last " + data!.periodDays + (data!.periodDays > 1 ? " days" : " day")} />
-            <Card label="Avg First Response Time" tip={TIP_FRT}
+            <SummaryCard label="Avg First Response Time" tip={TIP_FRT}
               value={s.avgFrtFmt} sub="Avg time to first human reply" />
-            <Card label="Top 3 Agents by Closed">
+            <SummaryCard label="Top 3 Agents by Closed">
               <div className="mt-1 space-y-1.5">
                 {s.top3.map((ag, i) => (
                   <div key={ag.name} className="flex items-center gap-2">
-                    <span className="text-xs font-bold text-gray-400 w-4">{i + 1}.</span>
-                    <Avatar name={ag.name} size="xs" />
-                    <span className="text-xs font-medium text-gray-700 truncate flex-1">{ag.name}</span>
-                    <span className="text-xs font-bold text-indigo-600">{ag.closed}</span>
+                    <span className="w-4 text-xs font-bold text-muted-foreground">{i + 1}.</span>
+                    <AgentAvatar name={ag.name} size="xs" />
+                    <span className="flex-1 truncate text-xs font-medium">{ag.name}</span>
+                    <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{ag.closed}</span>
                   </div>
                 ))}
               </div>
-            </Card>
-            <Card label="SLA Compliance (24H)">
-              <p className={`text-2xl font-bold ${s.slaRate >= 80 ? "text-green-600" : s.slaRate >= 60 ? "text-amber-600" : "text-red-600"}`}>
-                {s.slaRate}%
-              </p>
-              <p className="text-xs text-gray-400 mt-0.5">{s.slaMetCount} met / {s.slaTotalCount} total</p>
+            </SummaryCard>
+            <SummaryCard label="SLA Compliance (24H)">
+              <p className={cn("text-2xl font-bold", slaText(s.slaRate))}>{s.slaRate}%</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{s.slaMetCount} met / {s.slaTotalCount} total</p>
               <SlaBar rate={s.slaRate} />
-            </Card>
+            </SummaryCard>
           </div>
 
-          {/* Disclaimer banner -- collapsible */}
-          <details className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 group">
-            <summary className="flex items-center gap-2 cursor-pointer list-none select-none text-sm font-semibold text-amber-800 [&::-webkit-details-marker]:hidden">
-              <span className="text-amber-500 text-lg flex-shrink-0">!</span>
+          {/* Disclaimer banner — collapsible */}
+          <details className="group rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
+            <summary className="flex cursor-pointer list-none select-none items-center gap-2 text-sm font-semibold text-amber-700 dark:text-amber-300 [&::-webkit-details-marker]:hidden">
+              <span className="flex-shrink-0 text-lg text-amber-500">!</span>
               Why don&apos;t these numbers match the Intercom report?
-              <span className="ml-auto text-amber-500 transition-transform group-open:rotate-90">&#8250;</span>
+              <ChevronRight className="ml-auto h-4 w-4 text-amber-500 transition-transform group-open:rotate-90" />
             </summary>
-            <div className="mt-3 pl-7 text-xs text-amber-800 leading-relaxed space-y-2">
+            <div className="mt-3 space-y-2 pl-7 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
               <p><strong>Why is Emails Closed lower than the Intercom report?</strong> Our count uses the current conversation owner to assign credit. About 7-10% of closures are missed because some agents close conversations without formally claiming them. Intercom tracks every close action at a deeper level not accessible via the public API.</p>
-              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours -- a much smaller number. These are different metrics and will not match.</p>
+              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours - a much smaller number. These are different metrics and will not match.</p>
             </div>
           </details>
 
           {/* Table 1 — Conversation Volume */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100">
-              <p className="font-semibold text-gray-900 text-sm">Conversation Volume</p>
-              <p className="text-xs text-gray-400 mt-0.5">Assignment and reply activity per teammate</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <TH cols={[
-                  "Teammate",
-                  "Conversations Assigned",
-                  "Conversations Replied To",
-                  { label: "Closed Conversations", tip: TIP_CLOSED },
-                ]} />
-                <tbody>
-                  <tr className="bg-gray-900 text-white font-semibold">
-                    <td className="px-4 py-3 text-sm">Summary</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.assigned.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliedTo.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.closed.toLocaleString()}</td>
-                  </tr>
-                  {data!.agents.map((row, i) => (
-                    <tr key={row.name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                      <td className="px-4 py-3">
+          <Card className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b py-4">
+              <CardTitle className="text-sm">Conversation Volume</CardTitle>
+              <CardDescription className="text-xs">Assignment and reply activity per teammate</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <HeadRow cols={[
+                    "Teammate",
+                    "Conversations Assigned",
+                    "Conversations Replied To",
+                    { label: "Closed Conversations", tip: TIP_CLOSED },
+                  ]} />
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60">
+                    <TableCell>Summary</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.assigned.toLocaleString()}</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.repliedTo.toLocaleString()}</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.closed.toLocaleString()}</TableCell>
+                  </TableRow>
+                  {data!.agents.map((row) => (
+                    <TableRow key={row.name}>
+                      <TableCell>
                         <div className="flex items-center gap-2">
-                          <Avatar name={row.name} />
-                          <span className="font-medium text-gray-900 text-sm">{row.name}</span>
+                          <AgentAvatar name={row.name} />
+                          <span className="text-sm font-medium">{row.name}</span>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.assigned}</td>
-                      <td className="px-4 py-3 text-center text-gray-700 font-medium">{row.repliedTo}</td>
-                      <td className="px-4 py-3 text-center font-bold text-gray-900">{row.closed}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="text-center font-medium text-muted-foreground">{row.assigned}</TableCell>
+                      <TableCell className="text-center font-medium text-muted-foreground">{row.repliedTo}</TableCell>
+                      <TableCell className="text-center font-bold">{row.closed}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
 
           {/* Table 2 — Timing and Efficiency */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-100 overflow-hidden">
-            <div className="px-5 py-3 border-b border-gray-100">
-              <p className="font-semibold text-gray-900 text-sm">Timing and Efficiency</p>
-              <p className="text-xs text-gray-400 mt-0.5">Hover the blue i icons on column headers to understand accuracy limitations vs Intercom</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <TH cols={[
-                  "Teammate",
-                  { label: "Avg First Response Time", tip: TIP_FRT },
-                  { label: "Avg Handling Time",       tip: TIP_HANDLING },
-                  { label: "Replied / Day (avg)",     tip: TIP_REPLIED_HR },
-                  { label: "Closed / Day (avg)",      tip: TIP_CLOSED_HR },
-                ]} />
-                <tbody>
-                  <tr className="bg-gray-900 text-white font-semibold">
-                    <td className="px-4 py-3 text-sm">Summary</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgFrtFmt}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.avgHandlingFmt}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.repliedPerHour}</td>
-                    <td className="px-4 py-3 text-center">{data!.summaryRow.closedPerHour}</td>
-                  </tr>
-                  {data!.agents.map((row, i) => (
-                    <tr key={row.name} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/60"}>
-                      <td className="px-4 py-3">
+          <Card className="gap-0 overflow-hidden py-0">
+            <CardHeader className="border-b py-4">
+              <CardTitle className="text-sm">Timing and Efficiency</CardTitle>
+              <CardDescription className="text-xs">Hover the blue i icons on column headers to understand accuracy limitations vs Intercom</CardDescription>
+            </CardHeader>
+            <CardContent className="p-0">
+              <Table>
+                <TableHeader>
+                  <HeadRow cols={[
+                    "Teammate",
+                    { label: "Avg First Response Time", tip: TIP_FRT },
+                    { label: "Avg Handling Time",       tip: TIP_HANDLING },
+                    { label: "Replied / Day (avg)",     tip: TIP_REPLIED_HR },
+                    { label: "Closed / Day (avg)",      tip: TIP_CLOSED_HR },
+                  ]} />
+                </TableHeader>
+                <TableBody>
+                  <TableRow className="bg-muted/60 font-semibold hover:bg-muted/60">
+                    <TableCell>Summary</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.avgFrtFmt}</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.avgHandlingFmt}</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.repliedPerHour}</TableCell>
+                    <TableCell className="text-center">{data!.summaryRow.closedPerHour}</TableCell>
+                  </TableRow>
+                  {data!.agents.map((row) => (
+                    <TableRow key={row.name}>
+                      <TableCell>
                         <div className="flex items-center gap-2">
-                          <Avatar name={row.name} />
+                          <AgentAvatar name={row.name} />
                           <div>
-                            <div className="font-medium text-gray-900 text-sm">{row.name}</div>
-                            <div className="flex items-center gap-1 mt-0.5">
-                              <span className="text-xs text-gray-400">SLA</span>
-                              <span className={`text-xs font-semibold ${row.slaRate >= 80 ? "text-green-600" : row.slaRate >= 60 ? "text-amber-600" : "text-red-600"}`}>
+                            <div className="text-sm font-medium">{row.name}</div>
+                            <div className="mt-0.5 flex items-center gap-1">
+                              <span className="text-xs text-muted-foreground">SLA</span>
+                              <span className={cn("text-xs font-semibold", slaText(row.slaRate))}>
                                 {row.slaTotal > 0 ? row.slaRate + "%" : "--"}
                               </span>
                             </div>
                           </div>
                         </div>
-                      </td>
-                      <td className="px-4 py-3 text-center text-gray-700">{row.avgFrtFmt}</td>
-                      <td className="px-4 py-3 text-center text-gray-700">{row.avgHandlingFmt}</td>
-                      <td className="px-4 py-3 text-center font-medium text-gray-900">{row.repliedPerHour}</td>
-                      <td className="px-4 py-3 text-center font-medium text-gray-900">{row.closedPerHour}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell className="text-center text-muted-foreground">{row.avgFrtFmt}</TableCell>
+                      <TableCell className="text-center text-muted-foreground">{row.avgHandlingFmt}</TableCell>
+                      <TableCell className="text-center font-medium">{row.repliedPerHour}</TableCell>
+                      <TableCell className="text-center font-medium">{row.closedPerHour}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
         </div>
       ) : null}
     </div>
