@@ -72,7 +72,7 @@ export default function DashboardPage() {
             <div style={vis("regular-task")} className={cn(legacy)}>
               {mounted["regular-task"] ? <RegularTaskTab /> : null}
             </div>
-            <div style={vis("tickets")} className={cn(legacy)}>
+            <div style={vis("tickets")}>
               {mounted["tickets"] ? <TicketsTab /> : null}
             </div>
             <div style={vis("trading-ethics")} className={cn(legacy)}>
