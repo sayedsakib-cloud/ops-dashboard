@@ -97,37 +97,79 @@ function fmtIsoDate(iso: string) {
 
 // ---------- Top-level component ------------------------------------------------
 
+// Shared date range across all sub-tabs. Empty strings mean "use each section's default".
+export type DateRange = { from: string; to: string };
+
+const TAB_TRIGGER_CLS =
+  "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm";
+
 export default function DailyHuddleTab() {
+  // The single source of truth for the date range, owned here so it survives tab switches.
+  // `applied` is what the sections actually fetch with; the draft lives in the filter bar.
+  const [applied, setApplied] = useState<DateRange>({ from: "", to: "" });
+  // Bounds (min/max selectable dates) discovered from the huddle route once it loads.
+  const [bounds, setBounds] = useState<{ min?: string; max?: string }>({});
+
   return (
     <Tabs defaultValue="huddle" className="space-y-4">
-      <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
-        <TabsTrigger value="huddle" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
-          Huddle Metrics
-        </TabsTrigger>
-        <TabsTrigger value="alignment" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
-          Alignment Huddle
-        </TabsTrigger>
-        <TabsTrigger value="bdsl" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
-          BD-SL Contribution
-        </TabsTrigger>
-        <TabsTrigger value="weekly" className="inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm">
-          Weekly Trend
-        </TabsTrigger>
-      </TabsList>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+          <TabsTrigger value="huddle" className={TAB_TRIGGER_CLS}>Huddle Metrics</TabsTrigger>
+          <TabsTrigger value="alignment" className={TAB_TRIGGER_CLS}>Alignment Huddle</TabsTrigger>
+          <TabsTrigger value="bdsl" className={TAB_TRIGGER_CLS}>BD-SL Contribution</TabsTrigger>
+          <TabsTrigger value="weekly" className={TAB_TRIGGER_CLS}>Weekly Trend</TabsTrigger>
+        </TabsList>
+
+        <SharedDateFilter applied={applied} onApply={setApplied} bounds={bounds} />
+      </div>
 
       <TabsContent value="huddle" className="mt-4 focus-visible:outline-none">
-        <HuddleMetricsSection />
+        <HuddleMetricsSection range={applied} onBounds={setBounds} />
       </TabsContent>
       <TabsContent value="alignment" className="mt-4 focus-visible:outline-none">
-        <AlignmentSection />
+        <AlignmentSection range={applied} />
       </TabsContent>
       <TabsContent value="bdsl" className="mt-4 focus-visible:outline-none">
-        <BdSlSection />
+        <BdSlSection range={applied} />
       </TabsContent>
       <TabsContent value="weekly" className="mt-4 focus-visible:outline-none">
-        <WeeklySection />
+        <WeeklySection range={applied} />
       </TabsContent>
     </Tabs>
+  );
+}
+
+// One filter bar that drives every sub-tab. Holds a local draft; commits on Apply.
+function SharedDateFilter({
+  applied, onApply, bounds,
+}: {
+  applied: DateRange;
+  onApply: (r: DateRange) => void;
+  bounds: { min?: string; max?: string };
+}) {
+  const [from, setFrom] = useState(applied.from);
+  const [to, setTo] = useState(applied.to);
+
+  // Keep the draft in sync if applied changes elsewhere (e.g. Reset).
+  useEffect(() => { setFrom(applied.from); setTo(applied.to); }, [applied.from, applied.to]);
+
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">From</Label>
+        <Input type="date" value={from} min={bounds.min} max={bounds.max}
+          onChange={e => setFrom(e.target.value)} className="w-auto" />
+      </div>
+      <div className="space-y-1">
+        <Label className="text-xs text-muted-foreground">To</Label>
+        <Input type="date" value={to} min={bounds.min} max={bounds.max}
+          onChange={e => setTo(e.target.value)} className="w-auto" />
+      </div>
+      <Button onClick={() => onApply({ from, to })}>Apply</Button>
+      <Button variant="secondary" onClick={() => { setFrom(""); setTo(""); onApply({ from: "", to: "" }); }}>
+        Reset
+      </Button>
+    </div>
   );
 }
 
@@ -135,14 +177,12 @@ export default function DailyHuddleTab() {
 //   1. HUDDLE METRICS  (rename of "Daily Huddle - Operations" + Negative Feedbacks)
 // =============================================================================
 
-function HuddleMetricsSection() {
+function HuddleMetricsSection({ range, onBounds }: { range: DateRange; onBounds: (b: { min?: string; max?: string }) => void }) {
   const [data, setData] = useState<HuddleData | null>(null);
   const [feedbacks, setFeedbacks] = useState<Feedback[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [feedbackLoading, setFeedbackLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [rangeStart, setStart] = useState("");
-  const [rangeEnd, setEnd] = useState("");
 
   async function loadHuddle(start?: string, end?: string) {
     setLoading(true);
@@ -156,8 +196,9 @@ function HuddleMetricsSection() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to load");
       setData(json as HuddleData);
-      setStart((json.rangeStart ?? json.date ?? "") as string);
-      setEnd((json.rangeEnd ?? json.date ?? "") as string);
+      // Report selectable bounds to the parent filter bar once.
+      const dates = (json.availableDates ?? []) as string[];
+      if (dates.length) onBounds({ min: dates[0], max: dates[dates.length - 1] });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load Huddle Metrics.");
     } finally {
@@ -167,7 +208,7 @@ function HuddleMetricsSection() {
 
   useEffect(() => {
     let cancelled = false;
-    loadHuddle();
+    loadHuddle(range.from || undefined, range.to || undefined);
     (async () => {
       setFeedbackLoading(true);
       try {
@@ -183,42 +224,24 @@ function HuddleMetricsSection() {
     })();
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [range.from, range.to]);
 
-  const minDate = data?.availableDates?.[0];
-  const maxDate = data?.availableDates?.[data.availableDates.length - 1];
   const isRange = (data?.rangeDays ?? 1) > 1;
 
   return (
     <div className="space-y-4">
-      {/* Title bar + date range picker */}
+      {/* Title bar */}
       <Card className="border bg-card">
-        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Huddle Metrics</h2>
-            {data ? (
-              <p className="mt-1 text-sm text-muted-foreground">
-                {isRange
-                  ? `Showing ${fmtIsoDate(data.rangeStart)} to ${fmtIsoDate(data.rangeEnd)}`
-                  : `Showing ${fmtIsoDate(data.rangeEnd)}`}
-                {data.prevDate ? " (vs prior period)" : ""}
-              </p>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">From</Label>
-              <Input type="date" value={rangeStart} min={minDate} max={maxDate}
-                onChange={e => setStart(e.target.value)} className="w-auto" />
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs text-muted-foreground">To</Label>
-              <Input type="date" value={rangeEnd} min={minDate} max={maxDate}
-                onChange={e => setEnd(e.target.value)} className="w-auto" />
-            </div>
-            <Button onClick={() => loadHuddle(rangeStart, rangeEnd)}>Apply</Button>
-            <Button variant="secondary" onClick={() => { setStart(""); setEnd(""); loadHuddle(); }}>Reset</Button>
-          </div>
+        <CardContent className="p-5">
+          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Huddle Metrics</h2>
+          {data ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {isRange
+                ? `Showing ${fmtIsoDate(data.rangeStart)} to ${fmtIsoDate(data.rangeEnd)}`
+                : `Showing ${fmtIsoDate(data.rangeEnd)}`}
+              {data.prevDate ? " (vs prior period)" : ""}
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -387,7 +410,7 @@ function KpiSkeletonGrid({ count }: { count: number }) {
 //   2. ALIGNMENT HUDDLE  (4 cards: BD BizOps, BD CR, SL BizOps, SL CR)
 // =============================================================================
 
-function AlignmentSection() {
+function AlignmentSection({ range }: { range: DateRange }) {
   const [data, setData] = useState<AlignmentPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -396,8 +419,13 @@ function AlignmentSection() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const r = await fetch("/api/daily-huddle/alignment");
+        const p = new URLSearchParams();
+        if (range.from) p.set("from", range.from);
+        if (range.to) p.set("to", range.to);
+        const url = "/api/daily-huddle/alignment" + (p.toString() ? "?" + p.toString() : "");
+        const r = await fetch(url);
         if (!r.ok) throw new Error("Failed to load");
         const j = (await r.json()) as AlignmentPayload;
         if (!cancelled) setData(j);
@@ -408,7 +436,7 @@ function AlignmentSection() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [range.from, range.to]);
 
   // Latest date across all four buckets, for the header pill.
   const headerDate = (() => {
@@ -492,7 +520,7 @@ function AlignmentCard({ title, rows, variant }: { title: string; rows: AlignRow
 //   3. BD-SL CONTRIBUTION  (6 horizontal bar charts)
 // =============================================================================
 
-function BdSlSection() {
+function BdSlSection({ range }: { range: DateRange }) {
   const [data, setData] = useState<BdSlPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -501,8 +529,13 @@ function BdSlSection() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const r = await fetch("/api/daily-huddle/bd-sl");
+        // BD-SL is a single-day snapshot; use the range end date when set.
+        const p = new URLSearchParams();
+        if (range.to) p.set("date", range.to);
+        const url = "/api/daily-huddle/bd-sl" + (p.toString() ? "?" + p.toString() : "");
+        const r = await fetch(url);
         if (!r.ok) throw new Error("Failed to load");
         const j = (await r.json()) as BdSlPayload;
         if (!cancelled) setData(j);
@@ -513,7 +546,7 @@ function BdSlSection() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [range.to]);
 
   return (
     <div className="space-y-4">
@@ -672,7 +705,7 @@ function BdSlBarVertical({ title, data, dateLabel }: { title: string; data: { se
 //   4. WEEKLY TREND  (BizOps grouped bars + CR dual-axis + Savings bars)
 // =============================================================================
 
-function WeeklySection() {
+function WeeklySection({ range }: { range: DateRange }) {
   const [data, setData] = useState<WeeklyPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -681,8 +714,14 @@ function WeeklySection() {
     let cancelled = false;
     (async () => {
       setLoading(true);
+      setError(null);
       try {
-        const r = await fetch("/api/daily-huddle/weekly");
+        // Weekly defaults to last completed Mon-Sun when no range is set.
+        const p = new URLSearchParams();
+        if (range.from) p.set("from", range.from);
+        if (range.to) p.set("to", range.to);
+        const url = "/api/daily-huddle/weekly" + (p.toString() ? "?" + p.toString() : "");
+        const r = await fetch(url);
         if (!r.ok) throw new Error("Failed to load");
         const j = (await r.json()) as WeeklyPayload;
         if (!cancelled) setData(j);
@@ -693,7 +732,7 @@ function WeeklySection() {
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [range.from, range.to]);
 
   return (
     <div className="space-y-4">
