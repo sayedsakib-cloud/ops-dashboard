@@ -6,7 +6,7 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
   CartesianGrid, Legend,
 } from "recharts";
-import { ArrowRight, Loader2, ArrowUp, ArrowDown, Calendar as CalIcon } from "lucide-react";
+import { ArrowRight, Loader2, Calendar as CalIcon } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,29 +14,26 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 
 // ---------- Types --------------------------------------------------------------
 
 type Fmt = "number" | "hrs" | "currency";
-
-type MetricRow = {
-  label: string;
-  key: string;
-  value: number;
-  prev: number;
-  fmt?: Fmt;
-};
+type Metric = { label: string; value: number | null; change: number | null; format: Fmt };
 
 type HuddleData = {
-  date: string;          // formatted (e.g. "Jun 15, 2026")
-  prevDate?: string;
-  bizops: MetricRow[];
-  cr: MetricRow[];
-  savings: { value: number; prev: number };
-  eligibleKyc: number;
-  eligiblePayout: number;
-  prevEligiblePayout?: number;
+  date: string;
+  prevDate: string | null;
+  rangeStart: string;
+  rangeEnd: string;
+  rangeDays: number;
+  availableDates: string[];
+  bizops: Metric[];
+  bizopsEligible: { fnProcessed: Metric; eligibleKYC: Metric; eligiblePayout: Metric };
+  cr: Metric[];
+  crSavings: Metric;
 };
 
 type Feedback = { date: string; communityChaos: string; trustpilot: string };
@@ -72,23 +69,30 @@ type WeeklyPayload = {
 // ---------- Formatting helpers -------------------------------------------------
 
 const fmtNumber = (n: number) => n.toLocaleString();
-const fmtHrs = (n: number) => `${n.toFixed(2)} hrs`;
-const fmtCurrency = (n: number) =>
-  new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
 const fmtCurrencyShort = (n: number) => {
   if (Math.abs(n) >= 1000) return `${(n / 1000).toFixed(1)}K`;
   return n.toFixed(0);
 };
 
-function formatBy(fmt: Fmt | undefined, n: number) {
-  if (fmt === "hrs") return fmtHrs(n);
-  if (fmt === "currency") return fmtCurrency(n);
-  return fmtNumber(n);
+function fmtMetric(m: Metric): string {
+  if (m.value === null) return "--";
+  if (m.format === "currency")
+    return new Intl.NumberFormat("en-US", {
+      style: "currency", currency: "USD", minimumFractionDigits: 2,
+    }).format(m.value);
+  if (m.format === "hrs") return `${m.value} hrs`;
+  return new Intl.NumberFormat("en-US").format(m.value);
 }
 
-function pctChange(curr: number, prev: number): number | null {
-  if (!isFinite(prev) || prev === 0) return null;
-  return ((curr - prev) / prev) * 100;
+function fmtCurrency(n: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+}
+
+function fmtIsoDate(iso: string) {
+  // iso is "YYYY-MM-DD"
+  return new Date(iso + "T00:00:00").toLocaleDateString("en-US", {
+    month: "short", day: "numeric", year: "numeric",
+  });
 }
 
 // ---------- Top-level component ------------------------------------------------
@@ -137,22 +141,33 @@ function HuddleMetricsSection() {
   const [loading, setLoading] = useState(true);
   const [feedbackLoading, setFeedbackLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [rangeStart, setStart] = useState("");
+  const [rangeEnd, setEnd] = useState("");
+
+  async function loadHuddle(start?: string, end?: string) {
+    setLoading(true);
+    setError(null);
+    try {
+      const p = new URLSearchParams();
+      if (start) p.set("startDate", start);
+      if (end) p.set("endDate", end);
+      const url = "/api/dailyhuddle" + (p.toString() ? "?" + p.toString() : "");
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Failed to load");
+      setData(json as HuddleData);
+      setStart((json.rangeStart ?? json.date ?? "") as string);
+      setEnd((json.rangeEnd ?? json.date ?? "") as string);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not load Huddle Metrics.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      setLoading(true);
-      try {
-        const r = await fetch("/api/daily-huddle");
-        if (!r.ok) throw new Error("Failed to load");
-        const j = (await r.json()) as HuddleData;
-        if (!cancelled) setData(j);
-      } catch {
-        if (!cancelled) setError("Could not load Huddle Metrics.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
+    loadHuddle();
     (async () => {
       setFeedbackLoading(true);
       try {
@@ -167,21 +182,45 @@ function HuddleMetricsSection() {
       }
     })();
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const minDate = data?.availableDates?.[0];
+  const maxDate = data?.availableDates?.[data.availableDates.length - 1];
+  const isRange = (data?.rangeDays ?? 1) > 1;
 
   return (
     <div className="space-y-4">
-      {/* Title bar */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold tracking-tight text-foreground">Huddle Metrics</h2>
-          {data?.date ? (
-            <p className="mt-1 text-sm text-muted-foreground">
-              Showing {data.date}{data.prevDate ? ` (vs ${data.prevDate})` : ""}
-            </p>
-          ) : null}
-        </div>
-      </div>
+      {/* Title bar + date range picker */}
+      <Card className="border bg-card">
+        <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-2xl font-semibold tracking-tight text-foreground">Huddle Metrics</h2>
+            {data ? (
+              <p className="mt-1 text-sm text-muted-foreground">
+                {isRange
+                  ? `Showing ${fmtIsoDate(data.rangeStart)} to ${fmtIsoDate(data.rangeEnd)}`
+                  : `Showing ${fmtIsoDate(data.rangeEnd)}`}
+                {data.prevDate ? " (vs prior period)" : ""}
+              </p>
+            ) : null}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <Input type="date" value={rangeStart} min={minDate} max={maxDate}
+                onChange={e => setStart(e.target.value)} className="w-auto" />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input type="date" value={rangeEnd} min={minDate} max={maxDate}
+                onChange={e => setEnd(e.target.value)} className="w-auto" />
+            </div>
+            <Button onClick={() => loadHuddle(rangeStart, rangeEnd)}>Apply</Button>
+            <Button variant="secondary" onClick={() => { setStart(""); setEnd(""); loadHuddle(); }}>Reset</Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* BizOps Last Day Metrics */}
       <Card className="overflow-hidden border bg-card">
@@ -192,19 +231,24 @@ function HuddleMetricsSection() {
         </CardHeader>
         <CardContent className="p-4">
           {loading ? <KpiSkeletonGrid count={10} /> : error ? (
-            <p className="py-8 text-center text-sm text-destructive">{error}</p>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-              {data?.bizops.slice(0, 6).map(m => <MetricTile key={m.key} row={m} />)}
-              {data?.bizops.slice(6).map(m => (
-                m.key === "todays-eligible-count" ? (
-                  <EligibleCountTile key={m.key} kyc={data.eligibleKyc} payoutSoFar={data.eligiblePayout} prevPayoutSoFar={data.prevEligiblePayout} />
-                ) : (
-                  <MetricTile key={m.key} row={m} />
-                )
-              ))}
+            <p className="py-8 text-center text-sm text-destructive">Could not load Huddle Metrics.</p>
+          ) : data ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+                {data.bizops.map(m => <MetricTile key={m.label} m={m} />)}
+              </div>
+              <div className="grid grid-cols-2 items-stretch gap-3 md:grid-cols-4">
+                <MetricTile m={data.bizopsEligible.fnProcessed} />
+                <Card className="flex flex-col items-center justify-center gap-0 border bg-card p-4 text-center">
+                  <span className="text-sm font-bold leading-tight text-foreground">Today&apos;s</span>
+                  <span className="text-sm font-bold leading-tight text-foreground">Eligible Count</span>
+                  <ArrowRight className="mt-1 h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+                </Card>
+                <MetricTile m={data.bizopsEligible.eligibleKYC} />
+                <MetricTile m={data.bizopsEligible.eligiblePayout} />
+              </div>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
@@ -216,26 +260,33 @@ function HuddleMetricsSection() {
           </CardTitle>
         </CardHeader>
         <CardContent className="p-4">
-          {loading ? <KpiSkeletonGrid count={6} /> : (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
-              {data?.cr.map(m => <MetricTile key={m.key} row={m} />)}
+          {loading ? <KpiSkeletonGrid count={6} /> : data ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+              {data.cr.map(m => <MetricTile key={m.label} m={m} />)}
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
       {/* Savings Amount */}
       <Card className="border bg-card">
         <CardContent className="p-6 text-center">
-          <p className="text-sm text-muted-foreground">Savings Amount</p>
+          <p className="text-sm text-muted-foreground">{data?.crSavings.label ?? "Savings Amount"}</p>
           {loading || !data ? (
             <Skeleton className="mx-auto mt-2 h-10 w-40" />
           ) : (
             <>
               <p className="mt-1 text-3xl font-bold tracking-tight text-foreground">
-                {fmtCurrency(data.savings.value)}
+                {fmtMetric(data.crSavings)}
               </p>
-              <ChangeBadge curr={data.savings.value} prev={data.savings.prev} />
+              {data.crSavings.change !== null ? (
+                <p className={cn(
+                  "mt-1 text-sm font-medium",
+                  data.crSavings.change >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
+                )}>
+                  {data.crSavings.change >= 0 ? "+" : ""}{data.crSavings.change.toFixed(1)}%
+                </p>
+              ) : null}
             </>
           )}
         </CardContent>
@@ -267,9 +318,9 @@ function HuddleMetricsSection() {
                 <TableBody>
                   {feedbacks.map((f, i) => (
                     <TableRow key={i}>
-                      <TableCell className="whitespace-nowrap font-medium text-foreground">{f.date}</TableCell>
-                      <TableCell className="whitespace-pre-line text-sm text-foreground">{f.communityChaos || "-"}</TableCell>
-                      <TableCell className="whitespace-pre-line text-sm text-foreground">{f.trustpilot || "-"}</TableCell>
+                      <TableCell className="whitespace-nowrap align-top font-medium text-foreground">{f.date}</TableCell>
+                      <TableCell className="whitespace-pre-line align-top text-sm text-foreground">{f.communityChaos || "-"}</TableCell>
+                      <TableCell className="whitespace-pre-line align-top text-sm text-foreground">{f.trustpilot || "-"}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -307,71 +358,26 @@ function HuddleMetricsSection() {
   );
 }
 
-function MetricTile({ row }: { row: MetricRow }) {
-  const change = pctChange(row.value, row.prev);
+function MetricTile({ m }: { m: Metric }) {
+  const up = (m.change ?? 0) >= 0;
   return (
-    <Card className="border bg-card">
-      <CardContent className="p-3">
-        <p className="text-[11px] font-medium text-muted-foreground">{row.label}</p>
-        <p className="mt-1 text-2xl font-bold tracking-tight text-foreground">
-          {formatBy(row.fmt, row.value)}
-        </p>
-        {change !== null ? (
-          <p className={cn(
-            "mt-0.5 text-xs font-medium",
-            change >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"
-          )}>
-            {change >= 0 ? "+" : ""}{change.toFixed(1)}%
-          </p>
+    <Card className="flex min-h-[90px] flex-col justify-between gap-0 border bg-card p-4">
+      <div className="mb-2 text-xs font-medium leading-snug text-muted-foreground">{m.label}</div>
+      <div>
+        <div className="text-2xl font-bold text-foreground">{fmtMetric(m)}</div>
+        {m.change !== null ? (
+          <div className={cn("mt-0.5 text-xs font-semibold", up ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500 dark:text-rose-400")}>
+            {up ? "+" : ""}{m.change.toFixed(1)}%
+          </div>
         ) : null}
-      </CardContent>
+      </div>
     </Card>
-  );
-}
-
-function EligibleCountTile({ kyc, payoutSoFar, prevPayoutSoFar }: { kyc: number; payoutSoFar: number; prevPayoutSoFar?: number }) {
-  const change = prevPayoutSoFar !== undefined ? pctChange(payoutSoFar, prevPayoutSoFar) : null;
-  return (
-    <Card className="border bg-card">
-      <CardContent className="p-3">
-        <p className="text-[11px] font-medium text-muted-foreground">
-          Today&apos;s Eligible Count <ArrowRight className="inline h-3 w-3 text-muted-foreground" />
-        </p>
-        <div className="mt-2 grid grid-cols-2 gap-2">
-          <div>
-            <p className="text-[10px] text-muted-foreground">KYC</p>
-            <p className="text-lg font-bold text-foreground">{fmtNumber(kyc)}</p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground">Payout So Far</p>
-            <p className="text-lg font-bold text-foreground">{fmtNumber(payoutSoFar)}</p>
-            {change !== null ? (
-              <p className={cn("text-[10px] font-medium", change >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-                {change >= 0 ? "+" : ""}{change.toFixed(1)}%
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function ChangeBadge({ curr, prev }: { curr: number; prev: number }) {
-  const c = pctChange(curr, prev);
-  if (c === null) return null;
-  const positive = c >= 0;
-  return (
-    <p className={cn("mt-1 inline-flex items-center gap-1 text-sm font-medium", positive ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400")}>
-      {positive ? <ArrowUp className="h-3.5 w-3.5" /> : <ArrowDown className="h-3.5 w-3.5" />}
-      {positive ? "+" : ""}{c.toFixed(1)}%
-    </p>
   );
 }
 
 function KpiSkeletonGrid({ count }: { count: number }) {
   return (
-    <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
       {Array.from({ length: count }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
     </div>
   );
