@@ -106,7 +106,10 @@ const TAB_TRIGGER_CLS =
 export default function DailyHuddleTab() {
   // The single source of truth for the date range, owned here so it survives tab switches.
   // `applied` is what the sections actually fetch with; the draft lives in the filter bar.
-  const [applied, setApplied] = useState<DateRange>({ from: "", to: "" });
+  const [huddleRange, setHuddleRange] = useState<DateRange>({ from: "", to: "" });
+  const [weeklyRange, setWeeklyRange] = useState<DateRange>({ from: "", to: "" });
+  const [alignRange, setAlignRange]   = useState<DateRange>({ from: "", to: "" });
+  const [bdslRange, setBdslRange]     = useState<DateRange>({ from: "", to: "" });
   // Bounds (min/max selectable dates) discovered from the huddle route once it loads.
   const [bounds, setBounds] = useState<{ min?: string; max?: string }>({});
 
@@ -120,7 +123,6 @@ export default function DailyHuddleTab() {
           <TabsTrigger value="weekly" className={TAB_TRIGGER_CLS}>Weekly Trend</TabsTrigger>
         </TabsList>
 
-        <SharedDateFilter applied={applied} onApply={setApplied} bounds={bounds} />
       </div>
 
       <TabsContent value="huddle" className="mt-4 focus-visible:outline-none">
