@@ -115,27 +115,36 @@ export default function DailyHuddleTab() {
 
   return (
     <Tabs defaultValue="huddle" className="space-y-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
-          <TabsTrigger value="huddle" className={TAB_TRIGGER_CLS}>Huddle Metrics</TabsTrigger>
-          <TabsTrigger value="alignment" className={TAB_TRIGGER_CLS}>Alignment Huddle</TabsTrigger>
-          <TabsTrigger value="bdsl" className={TAB_TRIGGER_CLS}>BD-SL Contribution</TabsTrigger>
-          <TabsTrigger value="weekly" className={TAB_TRIGGER_CLS}>Weekly Trend</TabsTrigger>
-        </TabsList>
+      <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+        <TabsTrigger value="huddle" className={TAB_TRIGGER_CLS}>Huddle Metrics</TabsTrigger>
+        <TabsTrigger value="alignment" className={TAB_TRIGGER_CLS}>Alignment Huddle</TabsTrigger>
+        <TabsTrigger value="bdsl" className={TAB_TRIGGER_CLS}>BD-SL Contribution</TabsTrigger>
+        <TabsTrigger value="weekly" className={TAB_TRIGGER_CLS}>Weekly Trend</TabsTrigger>
+      </TabsList>
 
-      </div>
-
-      <TabsContent value="huddle" className="mt-4 focus-visible:outline-none">
-        <HuddleMetricsSection range={applied} onBounds={setBounds} />
+      <TabsContent value="huddle" className="mt-4 space-y-4 focus-visible:outline-none">
+        <div className="flex justify-end">
+          <SharedDateFilter applied={huddleRange} onApply={setHuddleRange} bounds={bounds} />
+        </div>
+        <HuddleMetricsSection range={huddleRange} onBounds={setBounds} />
       </TabsContent>
-      <TabsContent value="alignment" className="mt-4 focus-visible:outline-none">
-        <AlignmentSection range={applied} />
+      <TabsContent value="alignment" className="mt-4 space-y-4 focus-visible:outline-none">
+        <div className="flex justify-end">
+          <SharedDateFilter applied={alignRange} onApply={setAlignRange} bounds={bounds} />
+        </div>
+        <AlignmentSection range={alignRange} />
       </TabsContent>
-      <TabsContent value="bdsl" className="mt-4 focus-visible:outline-none">
-        <BdSlSection range={applied} />
+      <TabsContent value="bdsl" className="mt-4 space-y-4 focus-visible:outline-none">
+        <div className="flex justify-end">
+          <SharedDateFilter applied={bdslRange} onApply={setBdslRange} bounds={bounds} />
+        </div>
+        <BdSlSection range={bdslRange} />
       </TabsContent>
-      <TabsContent value="weekly" className="mt-4 focus-visible:outline-none">
-        <WeeklySection range={applied} />
+      <TabsContent value="weekly" className="mt-4 space-y-4 focus-visible:outline-none">
+        <div className="flex justify-end">
+          <SharedDateFilter applied={weeklyRange} onApply={setWeeklyRange} bounds={bounds} />
+        </div>
+        <WeeklySection range={weeklyRange} />
       </TabsContent>
     </Tabs>
   );
