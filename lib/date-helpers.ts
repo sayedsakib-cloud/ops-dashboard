@@ -31,9 +31,22 @@ export function parseSheetDate(raw: string): Date | null {
   m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
   if (m) return new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
 
-  // MM/DD/YYYY
+  // DD/MM/YYYY or MM/DD/YYYY. Disambiguate: if the first number > 12 it must be the day.
   m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-  if (m) return new Date(Date.UTC(+m[3], +m[1] - 1, +m[2]));
+  if (m) {
+    const a = +m[1], b = +m[2], year = +m[3];
+    let day: number, month: number;
+    if (a > 12) {            // a can only be a day -> DD/MM/YYYY
+      day = a; month = b;
+    } else if (b > 12) {     // b can only be a day -> MM/DD/YYYY
+      day = b; month = a;
+    } else {                 // ambiguous (both <= 12) -> assume DD/MM/YYYY (sheet uses day-first)
+      day = a; month = b;
+    }
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31)
+      return new Date(Date.UTC(year, month - 1, day));
+    return null;
+  }
 
   // Fallback to Date.parse (last resort, may misread).
   const t = Date.parse(s);
