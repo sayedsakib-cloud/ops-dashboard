@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { google } from "googleapis";
 import { authOptions } from "@/lib/auth";
-import { parseSheetDate, formatLabel } from "@/lib/date-helpers";
+import { parseSheetDate, formatLabel, inRange } from "@/lib/date-helpers";
 
 export const dynamic = "force-dynamic";
 
@@ -17,11 +17,17 @@ type Payload = {
   slCR: Row[];
 };
 
-export async function GET() {
+export async function GET(req: Request) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
+    const url = new URL(req.url);
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    const start = fromParam ? parseSheetDate(fromParam) : null;
+    const end = toParam ? parseSheetDate(toParam) : null;
+
     const credsRaw = process.env.GOOGLE_CREDENTIALS_JSON;
     if (!credsRaw) throw new Error("missing google creds");
     const credentials = JSON.parse(credsRaw);
@@ -30,7 +36,7 @@ export async function GET() {
       credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
     });
-    const sheets = google.sheets({ version: "v4", auth: await auth.getClient() as never });
+    const sheets = google.sheets({ version: "v4", auth });
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId: SHEET_ID,
       range: RANGE,
@@ -52,6 +58,8 @@ export async function GET() {
       if (!dateRaw) continue;
       const d = parseSheetDate(String(dateRaw));
       if (!d) continue;
+      // Apply date range when provided.
+      if (start && end && !inRange(d, start, end)) continue;
       const dateLabel = formatLabel(d);
       push(out.bdBizOps, dateLabel, row[1], row[2]); // B, C
       push(out.bdCR,     dateLabel, row[3], row[4]); // D, E
