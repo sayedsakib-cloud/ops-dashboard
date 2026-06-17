@@ -863,7 +863,7 @@ function CrSavingsChart({ data }: { data: WeeklyPayload }) {
             <BarChart data={chartData} margin={{ top: 24, right: 16, bottom: 12, left: 0 }}>
               <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
               <XAxis dataKey="date" stroke={axisColor} fontSize={11} />
-              <YAxis stroke={axisColor} fontSize={11} tickFormatter={(v) => fmtCurrencyShort(v)} />
+              <YAxis stroke={axisColor} fontSize={11} tickFormatter={(v) => fmtCurrencyShort(Number(v) || 0)} />
               <Tooltip
                 cursor={{ fill: resolvedTheme === "dark" ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.15)" }}
                 contentStyle={{
@@ -873,11 +873,11 @@ function CrSavingsChart({ data }: { data: WeeklyPayload }) {
                 }}
                 labelStyle={{ color: resolvedTheme === "dark" ? "#f1f5f9" : "#111827", fontWeight: 600 }}
                 itemStyle={{ color: resolvedTheme === "dark" ? "#e2e8f0" : "#111827" }}
-                formatter={(v: number) => [fmtCurrency(v), "Savings"]}
+                formatter={(v) => [fmtCurrency(Number(v) || 0), "Savings"]}
               />
               <Bar dataKey="value" fill="#9333EA" radius={[6,6,0,0]}>
                 <LabelList dataKey="value" position="top" fill={labelColor} fontSize={11} fontWeight={600}
-                  formatter={(v: number) => fmtCurrencyShort(v)} />
+                  formatter={(v) => fmtCurrencyShort(Number(v) || 0)} />
               </Bar>
             </BarChart>
           </ResponsiveContainer>
