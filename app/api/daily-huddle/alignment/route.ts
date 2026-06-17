@@ -7,8 +7,9 @@ import { parseSheetDate, formatLabel, inRange } from "@/lib/date-helpers";
 export const dynamic = "force-dynamic";
 
 const SHEET_ID = process.env.DAILY_HUDDLE_SPREADSHEET_ID ?? "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
-// Header row is 3; actual data begins at row 278 on this tab.
-const RANGE = "Alignment Huddle!A278:I";
+// Read the whole column range; we self-detect data rows by date-parseability,
+// so header rows (row 3) and the blank gap before the real data are skipped safely.
+const RANGE = "Alignment Huddle!A:I";
 
 type Row = { date: string; achievement: string; focus: string };
 type Payload = {
@@ -76,7 +77,10 @@ export async function GET(req: Request) {
 
     return NextResponse.json(out);
   } catch (err) {
-    console.error("daily-huddle/alignment error:", err);
-    return NextResponse.json({ error: "Something went wrong" }, { status: 500 });
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("daily-huddle/alignment error:", msg);
+    // TEMP DEBUG: surface the real reason so we can see why it 500s.
+    // Remove the `detail` field once the tab loads correctly.
+    return NextResponse.json({ error: "Something went wrong", detail: msg }, { status: 500 });
   }
 }
