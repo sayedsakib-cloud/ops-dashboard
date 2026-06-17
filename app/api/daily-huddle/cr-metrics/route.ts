@@ -6,7 +6,7 @@ import { parseSheetDate, formatLabel } from "@/lib/date-helpers";
 
 export const dynamic = "force-dynamic";
 
-const SHEET_ID = "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
+const SHEET_ID = process.env.DAILY_HUDDLE_SPREADSHEET_ID ?? "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
 const RANGE = "CR Metrics!A2:F";
 
 export async function GET() {
