@@ -56,7 +56,7 @@ export async function GET(req: Request) {
       credentials,
       scopes: ["https://www.googleapis.com/auth/spreadsheets.readonly"],
     });
-    const sheets = google.sheets({ version: "v4", auth: await auth.getClient() as never });
+    const sheets = google.sheets({ version: "v4", auth });
     const res = await sheets.spreadsheets.values.batchGet({
       spreadsheetId: SHEET_ID,
       ranges: ["BizOps Metrics!A2:AQ", "CR Metrics!A2:M"],
