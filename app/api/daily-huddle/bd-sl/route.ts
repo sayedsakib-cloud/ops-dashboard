@@ -12,12 +12,12 @@ const SHEET_ID = process.env.DAILY_HUDDLE_SPREADSHEET_ID ?? "1JFHHe3vkqJk_kpONnO
 // BizOps Metrics
 const COL = {
   DATE: 0,        // A
-  KYC_BD: 23,     // X
-  KYC_SL: 24,     // Y
-  PAYOUT_BD: 25,  // Z
-  PAYOUT_SL: 26,  // AA
-  CLICKUP_BD: 27, // AB
-  CLICKUP_SL: 28, // AC
+  KYC_BD: 23,     // X  - Manual KYC by BD
+  KYC_SL: 26,     // AA - Manual KYC by SL
+  PAYOUT_BD: 24,  // Y  - Payout by BD
+  PAYOUT_SL: 27,  // AB - Payout by SL
+  CLICKUP_BD: 25, // Z  - ClickUp by BD
+  CLICKUP_SL: 28, // AC - ClickUp by SL
   INTERCOM_BD: 31,// AF
   INTERCOM_SL: 32,// AG
   KYC_AUTO: 34,   // AI
