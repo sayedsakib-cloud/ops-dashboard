@@ -212,7 +212,10 @@ function HuddleMetricsSection({ range, onBounds }: { range: DateRange; onBounds:
     (async () => {
       setFeedbackLoading(true);
       try {
-        const r = await fetch("/api/daily-huddle/cr-metrics");
+        const fp = new URLSearchParams();
+        if (range.from) fp.set("from", range.from);
+        if (range.to) fp.set("to", range.to);
+        const r = await fetch("/api/daily-huddle/cr-metrics" + (fp.toString() ? "?" + fp.toString() : ""));
         if (!r.ok) throw new Error("Failed to load");
         const j = (await r.json()) as { feedbacks: Feedback[] };
         if (!cancelled) setFeedbacks(j.feedbacks ?? []);
