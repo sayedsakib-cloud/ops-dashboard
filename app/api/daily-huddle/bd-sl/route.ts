@@ -6,7 +6,7 @@ import { parseSheetDate, formatLabel, toNum } from "@/lib/date-helpers";
 
 export const dynamic = "force-dynamic";
 
-const SHEET_ID = "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
+const SHEET_ID = process.env.DAILY_HUDDLE_SPREADSHEET_ID ?? "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
 
 // Column letter -> 0-based index. A=0, B=1, ..., Z=25, AA=26, AB=27, ...
 // BizOps Metrics
