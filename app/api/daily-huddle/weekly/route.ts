@@ -6,7 +6,7 @@ import { parseSheetDate, formatLabel, lastCompletedMonSun, inRange, toNum, ymd }
 
 export const dynamic = "force-dynamic";
 
-const SHEET_ID = "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
+const SHEET_ID = process.env.DAILY_HUDDLE_SPREADSHEET_ID ?? "1JFHHe3vkqJk_kpONnO9myupvZ7-ssNXtEDJ0CRVQjqk";
 
 // BizOps Metrics columns
 const BO = {
