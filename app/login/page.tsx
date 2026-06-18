@@ -53,7 +53,7 @@ function LoginInner() {
             />
             <div className="text-center">
               <h1 className="text-2xl font-bold tracking-tight text-foreground">Operations Dashboard</h1>
-              <p className="mt-1.5 text-sm text-muted-foreground">FundedNext CX Operations</p>
+              <p className="mt-1.5 text-sm text-muted-foreground">FundedNext Operations</p>
             </div>
           </div>
 
