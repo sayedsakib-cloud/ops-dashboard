@@ -13,7 +13,7 @@ const geistSans = Geist({ variable: "--font-geist-sans", subsets: ["latin"] });
 const geistMono = Geist_Mono({ variable: "--font-geist-mono", subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Ops Dashboard",
+  title: "Operations Dashboard",
   description: "Operations dashboard for Intercom and Google Sheets",
 };
 
