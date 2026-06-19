@@ -1,19 +1,20 @@
 import { NextResponse } from "next/server";
-import { getTeepCached, defaultWindows } from "@/app/api/teep/route";
+import { getTeepCached, warmYesterdayDay } from "@/app/api/teep/route";
 
-// Called by Vercel Cron once daily (2 AM UTC). Precomputes the common CLOSED
-// TEEP windows (yesterday, last 7 days, last 30 days) and writes them to the
-// Supabase cache, so the first human viewer of those periods gets an instant hit.
+// Called by Vercel Cron once daily (2 AM UTC = 8 AM Dhaka). Computes YESTERDAY's
+// single day-bucket (fast, well within the 60s limit) and writes it to Supabase.
+// Over time the day buckets accumulate, so any range (week/month/quarter) is
+// assembled instantly by summing cached days -- no truncation, no double-count.
 //
-// We call getTeepCached() DIRECTLY (same process) rather than fetching /api/teep
-// over HTTP -- that avoids the auth middleware entirely and is faster/cleaner.
-// Closed periods never change, so once written they stay valid indefinitely.
+// It then warms the common default ranges (last 7 / last 30) which, because the
+// days are now cached, assemble in milliseconds.
+//
+// Called DIRECTLY (same process) -- no HTTP, so it bypasses auth middleware.
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 300; // allow up to 5 min for the cold computes
+export const maxDuration = 60; // Hobby plan max
 
 export async function GET(req: Request) {
-  // Only allow Vercel Cron (or a caller holding CRON_SECRET).
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
@@ -21,13 +22,22 @@ export async function GET(req: Request) {
   }
 
   const results: Record<string, string> = {};
-  const windows = defaultWindows();
 
-  // Run sequentially -- each compute is heavy; parallel would hammer Intercom.
-  for (const w of windows) {
+  // 1. The important nightly task: compute yesterday's day bucket.
+  try {
+    const t0 = Date.now();
+    await warmYesterdayDay();
+    results["yesterday-day"] = `ok (${Math.round((Date.now() - t0) / 1000)}s)`;
+  } catch (e) {
+    results["yesterday-day"] = `failed: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  // 2. Warm common ranges (assemble from now-cached days -- should be fast).
+  for (const w of [{ label: "last7", days: 7 }, { label: "last30", days: 30 }]) {
     try {
       const t0 = Date.now();
-      await getTeepCached(w.uAfter, w.uBefore);
+      const { uAfter, uBefore } = rangeEndingYesterday(w.days);
+      await getTeepCached(uAfter, uBefore);
       results[w.label] = `ok (${Math.round((Date.now() - t0) / 1000)}s)`;
     } catch (e) {
       results[w.label] = `failed: ${e instanceof Error ? e.message : String(e)}`;
@@ -35,4 +45,16 @@ export async function GET(req: Request) {
   }
 
   return NextResponse.json({ warmed: results, at: new Date().toISOString() });
+}
+
+// Range of `days` ending yesterday (Dhaka), as unix-second bounds.
+function rangeEndingYesterday(days: number): { uAfter: number; uBefore: number } {
+  const dhakaNow = new Date(Date.now() + 6 * 3600 * 1000);
+  const Y = dhakaNow.getUTCFullYear(), M = dhakaNow.getUTCMonth(), D = dhakaNow.getUTCDate();
+  const startStr = new Date(Date.UTC(Y, M, D - days)).toISOString().slice(0, 10);
+  const endStr   = new Date(Date.UTC(Y, M, D - 1)).toISOString().slice(0, 10);
+  return {
+    uAfter:  Math.floor(new Date(startStr + "T00:00:00+06:00").getTime() / 1000),
+    uBefore: Math.floor(new Date(endStr   + "T23:59:59+06:00").getTime() / 1000),
+  };
 }
