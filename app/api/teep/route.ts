@@ -271,7 +271,6 @@ async function computeBase(uAfter: number, uBefore: number): Promise<BaseState> 
     const handling    = stats.time_to_first_close ?? 0;
     const assignment  = stats.time_to_assignment  ?? 0;
     const lastCloseAt = stats.last_close_at        ?? 0;
-    const countReopens= stats.count_reopens        ?? 0;
 
     if (c.admin_assignee_id && teepAdminIdSet.has(String(c.admin_assignee_id))) {
       agentMap.get(String(c.admin_assignee_id))!.assigned++;
@@ -302,10 +301,13 @@ async function computeBase(uAfter: number, uBefore: number): Promise<BaseState> 
     if (closedInPeriod) {
       const closerIds = resolveAgent(c, teepAdminIdSet, "single");
       if (closerIds.length > 0) {
+        // Attributed: count this conversation ONCE. Intercom's metric counts
+        // unique conversations closed, not each reopen->reclose event, so we do
+        // NOT fetch parts or add per-reopen tallies here.
         agentMap.get(closerIds[0])!.closed++;
         closeCounted.add(c.id);
-        if (countReopens > 0) needsParts.add(c.id);
       } else {
+        // Unattributed: need parts to find which teep admin actually closed it.
         needsParts.add(c.id);
       }
     }
@@ -313,14 +315,12 @@ async function computeBase(uAfter: number, uBefore: number): Promise<BaseState> 
 
   // Pass 2: closed-only extras (closed then reopened, missed by updated_at)
   for (const c of closedOnlyConvs) {
-    const countReopens = c.statistics?.count_reopens ?? 0;
-    const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
+    const closerIds = resolveAgent(c, teepAdminIdSet, "single");
     if (closerIds.length > 0) {
-      agentMap.get(closerIds[0])!.closed++;
+      agentMap.get(closerIds[0])!.closed++;   // count once
       closeCounted.add(c.id);
-      if (countReopens > 0) needsParts.add(c.id);
     } else {
-      needsParts.add(c.id);
+      needsParts.add(c.id);                    // unattributed: resolve closer via parts
     }
   }
 
@@ -372,22 +372,23 @@ async function applyParts(
   const ready    = needs.filter(id => allParts[id] !== undefined).length;
   const complete = ready >= total;
 
-  // Count in-window close events. Mirrors the original windowed Pass-3 logic:
-  // k indexes ALL admin close events in window (chronological); non-teep are
-  // skipped but still advance k; the first close of an already-counted
-  // conversation is the one Pass 1/2 attributed, so it is exempted (k===0).
+  // Count each conversation ONCE. Intercom's "Closed conversations" counts
+  // unique conversations closed in the range, not individual close events, so a
+  // reopened-and-reclosed conversation must not be tallied twice. needsParts now
+  // holds only UNATTRIBUTED conversations (Pass 1/2 already counted the
+  // attributed ones once); for each, attribute a single close to the teep admin
+  // who performed the most recent close inside the window.
   for (const convId of needs) {
     const events = allParts[convId];
     if (!events) continue;                                 // not resolved yet
-    const windowEvents = events.filter(e => e.closedAt >= uAfter && e.closedAt <= uBefore);
-    const already = closeCountedSet.has(convId);
-    for (let k = 0; k < windowEvents.length; k++) {
-      const adminId = windowEvents[k].adminId;
-      if (!teepAdminIdSet.has(adminId)) continue;
-      if (!already || k > 0) {
-        const acc = agentMap.get(adminId);
-        if (acc) acc.closed++;
-      }
+    if (closeCountedSet.has(convId)) continue;             // safety: already counted in Pass 1/2
+    const teepWindowCloses = events.filter(
+      e => e.closedAt >= uAfter && e.closedAt <= uBefore && teepAdminIdSet.has(e.adminId),
+    );
+    if (teepWindowCloses.length > 0) {
+      const closerId = teepWindowCloses[teepWindowCloses.length - 1].adminId; // last closer in window
+      const acc = agentMap.get(closerId);
+      if (acc) acc.closed++;
     }
   }
 
