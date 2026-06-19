@@ -462,8 +462,10 @@ async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
 // Uses the UTC calendar dates of the window bounds, so the same period always
 // maps to the same Supabase row regardless of the exact second requested.
 function periodKey(uAfter: number, uBefore: number): string {
-  const a = new Date(uAfter * 1000).toISOString().slice(0, 10);
-  const b = new Date(uBefore * 1000).toISOString().slice(0, 10);
+  // Use +06 (Dhaka) calendar dates so the key matches the user's selected range
+  // (toISOString() would shift to UTC and roll the start date back a day).
+  const a = new Date(uAfter * 1000 + 6 * 3600 * 1000).toISOString().slice(0, 10);
+  const b = new Date(uBefore * 1000 + 6 * 3600 * 1000).toISOString().slice(0, 10);
   return `${a}_${b}`;
 }
 
