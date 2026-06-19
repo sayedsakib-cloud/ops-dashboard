@@ -504,10 +504,11 @@ async function getTeepByDays(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
   const startedAt = Date.now();
-  // Stop launching new day computes once we approach the function limit, leaving
-  // headroom to merge/finalize/return valid JSON. maxDuration is 60s; budget 42s
-  // for fetching so a slow day can finish and we still respond cleanly.
-  const TIME_BUDGET_MS = 42_000;
+  // We compute at most MAX_DAYS missing days per request to stay under the 60s
+  // Hobby limit. A time guard stops us early if the first day was slow, so two
+  // heavy days can never combine to exceed the limit.
+  const MAX_DAYS         = 2;
+  const SLOW_GUARD_MS    = 30_000; // if elapsed exceeds this, don't start another day
 
   const days = listDays(uAfter, uBefore);
   const cachedMap = await readTeepDays(days);
@@ -520,14 +521,17 @@ async function getTeepByDays(
     if (cachedMap[d]) payloads.push(cachedMap[d] as RawPayload);
   }
 
-  // Compute missing days until the time budget is spent. Whatever doesn't fit
-  // fills in on the next load (cached days are skipped) or via the nightly cron.
+  // Compute missing days, bounded by count AND elapsed time.
   let complete = missing.length === 0;
+  let computed = 0;
   for (const d of missing) {
-    if (Date.now() - startedAt > TIME_BUDGET_MS) { complete = false; break; }
+    if (computed >= MAX_DAYS) { complete = false; break; }
+    // Before starting another day, ensure we have time headroom.
+    if (computed > 0 && Date.now() - startedAt > SLOW_GUARD_MS) { complete = false; break; }
     try {
       const raw = await computeAndCacheDay(d);
       payloads.push(raw);
+      computed++;
     } catch {
       complete = false;
     }
@@ -535,7 +539,7 @@ async function getTeepByDays(
 
   const merged = mergeRaw(payloads);
   const result = finalize(merged, uAfter, uBefore);
-  result.partial = !complete;            // UI can show "still computing -- reload"
+  result.partial = !complete;            // UI shows "still computing -- reload"
   result.daysTotal = days.length;        // how many days the range spans
   result.daysReady = payloads.length;    // how many are included so far
   return { result, complete };
