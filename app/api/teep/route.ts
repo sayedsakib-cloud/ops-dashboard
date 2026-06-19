@@ -2,10 +2,10 @@ import { NextResponse }    from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions }      from "@/lib/auth";
 import { unstable_cache }   from "next/cache";
+import { readTeepCache, writeTeepCache } from "@/lib/supabase";
 
 const INTERCOM_API  = "https://api.intercom.io";
 const SLA_SECS      = 24 * 3600;
-const CACHE_WINDOW  = 900; // 15-min rounding for stable cache keys
 
 const TEEP_AGENT_NAMES = [
   "john ferguson", "camellia warren", "anna linhart",
@@ -20,11 +20,6 @@ function toUnixStart(d: string) {
 }
 function toUnixEnd(d: string) {
   return Math.floor(new Date(d + "T23:59:59+06:00").getTime() / 1000);
-}
-// Round timestamp to nearest CACHE_WINDOW boundary so the default date range
-// produces a stable cache key across all requests in the same 15-min window.
-function roundTs(ts: number): number {
-  return Math.floor(ts / CACHE_WINDOW) * CACHE_WINDOW;
 }
 function fmt(secs: number): string {
   if (!secs || secs <= 0) return "--";
@@ -215,13 +210,12 @@ async function fetchCloseParts(
   return events;
 }
 
-// ── Full TEEP computation — cached 15 min ─────────────────────────────────
-// Wrapped in unstable_cache so the expensive 6-batch Intercom fetch only runs
-// ONCE per 15-min window per unique date range. All requests within the window
-// get the cached result in <100 ms. After TTL, stale data is served instantly
-// while a fresh fetch runs in the background (stale-while-revalidate).
-const getTeepResult = unstable_cache(
-  async (uAfter: number, uBefore: number): Promise<any> => {
+// ── Full TEEP computation (the expensive Intercom work) ───────────────────
+// This is the slow path: two OR-batched conversation searches + per-conversation
+// parts fetches. We only ever run it on a cache MISS. Because we only view
+// CLOSED periods (never today), a computed result is final and is stored in
+// Supabase forever -- so this runs at most once per period, ever.
+async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
     const token       = process.env.INTERCOM_ACCESS_TOKEN!;
     const periodDays  = Math.max(1, Math.round((uBefore - uAfter) / 86400));
     const workingDays = countWorkdays(uAfter, uBefore);
@@ -419,10 +413,56 @@ const getTeepResult = unstable_cache(
       summaryRow,
       agents: rows,
     };
-  },
-  ["teep-full-result"],
-  { revalidate: 900 } // 15-minute full result cache
-);
+}
+
+// ── Period key: stable identifier for a closed date range ─────────────────
+// Uses the UTC calendar dates of the window bounds, so the same period always
+// maps to the same Supabase row regardless of the exact second requested.
+function periodKey(uAfter: number, uBefore: number): string {
+  const a = new Date(uAfter * 1000).toISOString().slice(0, 10);
+  const b = new Date(uBefore * 1000).toISOString().slice(0, 10);
+  return `${a}_${b}`;
+}
+
+// ── Cache-first wrapper ───────────────────────────────────────────────────
+// 1. Try Supabase (instant). 2. On miss, compute once (slow). 3. Write back.
+// If Supabase is unreachable/unconfigured, fall back to a live compute so the
+// tab still works -- just without the speed-up.
+// Exported so the cron warmer can call it directly (no HTTP / no auth needed).
+export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
+  const key = periodKey(uAfter, uBefore);
+
+  // 1. Read-through cache
+  const cached = await readTeepCache(key);
+  if (cached) return cached;
+
+  // 2. Miss -> compute (the slow path, at most once per period)
+  const fresh = await computeTeep(uAfter, uBefore);
+
+  // 3. Write back (non-blocking failure is fine)
+  await writeTeepCache(key, fresh);
+
+  return fresh;
+}
+
+// ── Default precompute windows (used by the cron warmer) ──────────────────
+// All windows END YESTERDAY in +06 (Dhaka), since we never view today.
+// Returns unix-second [after, before] pairs for: yesterday (1d), last 7d, last 30d.
+export function defaultWindows(): Array<{ label: string; uAfter: number; uBefore: number }> {
+  const dhakaNow = new Date(Date.now() + 6 * 3600 * 1000);
+  const Y = dhakaNow.getUTCFullYear();
+  const M = dhakaNow.getUTCMonth();
+  const D = dhakaNow.getUTCDate();
+  const dStr = (offset: number) =>
+    new Date(Date.UTC(Y, M, D - offset)).toISOString().slice(0, 10);
+
+  const yesterday = dStr(1);
+  return [
+    { label: "yesterday", uAfter: toUnixStart(dStr(1)),  uBefore: toUnixEnd(yesterday) },
+    { label: "last7",     uAfter: toUnixStart(dStr(7)),  uBefore: toUnixEnd(yesterday) },
+    { label: "last30",    uAfter: toUnixStart(dStr(30)), uBefore: toUnixEnd(yesterday) },
+  ];
+}
 
 // ── Route handler ─────────────────────────────────────────────────────────
 export async function GET(req: Request) {
@@ -437,15 +477,13 @@ export async function GET(req: Request) {
     if (!process.env.INTERCOM_ACCESS_TOKEN)
       throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
-    const now = Math.floor(Date.now() / 1000);
+    // Default (no params) = last 7 completed days ending yesterday, matching the
+    // cron's "last7" window so the default view is always a pre-warmed cache hit.
+    const last7 = defaultWindows().find(w => w.label === "last7")!;
+    const uAfter  = startDate ? toUnixStart(startDate) : last7.uAfter;
+    const uBefore = endDate   ? toUnixEnd(endDate)     : last7.uBefore;
 
-    // Explicit date params: use exact boundaries (user chose them deliberately).
-    // Default (no params): round to 15-min window so every request in the same
-    // window shares the same cache key and gets a cache hit after the first load.
-    const uAfter  = startDate ? toUnixStart(startDate) : roundTs(now - 7 * 86400);
-    const uBefore = endDate   ? toUnixEnd(endDate)     : roundTs(now);
-
-    const data = await getTeepResult(uAfter, uBefore);
+    const data = await getTeepCached(uAfter, uBefore);
     return NextResponse.json(data);
 
   } catch (err) {
