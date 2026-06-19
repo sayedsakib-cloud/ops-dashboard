@@ -503,30 +503,31 @@ async function computeAndCacheDay(day: string): Promise<RawPayload> {
 async function getTeepByDays(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
+  const startedAt = Date.now();
+  // Stop launching new day computes once we approach the function limit, leaving
+  // headroom to merge/finalize/return valid JSON. maxDuration is 60s; budget 42s
+  // for fetching so a slow day can finish and we still respond cleanly.
+  const TIME_BUDGET_MS = 42_000;
+
   const days = listDays(uAfter, uBefore);
   const cachedMap = await readTeepDays(days);
 
   const missing = days.filter(d => !cachedMap[d]);
   const payloads: RawPayload[] = [];
 
-  // Use cached days
+  // Use cached days first (free)
   for (const d of days) {
     if (cachedMap[d]) payloads.push(cachedMap[d] as RawPayload);
   }
 
-  // Compute missing days, but bound how many we do in one request so we stay
-  // under the 60s function limit. Each day is a few seconds; cap at 8 per call.
-  // Remaining missing days fill in on subsequent loads / nightly cron.
-  const MAX_DAYS_PER_REQUEST = 8;
-  let computedCount = 0;
+  // Compute missing days until the time budget is spent. Whatever doesn't fit
+  // fills in on the next load (cached days are skipped) or via the nightly cron.
   let complete = missing.length === 0;
-
   for (const d of missing) {
-    if (computedCount >= MAX_DAYS_PER_REQUEST) { complete = false; break; }
+    if (Date.now() - startedAt > TIME_BUDGET_MS) { complete = false; break; }
     try {
       const raw = await computeAndCacheDay(d);
       payloads.push(raw);
-      computedCount++;
     } catch {
       complete = false;
     }
@@ -534,7 +535,9 @@ async function getTeepByDays(
 
   const merged = mergeRaw(payloads);
   const result = finalize(merged, uAfter, uBefore);
-  result.partial = !complete; // surfaced so UI can show "still computing" if desired
+  result.partial = !complete;            // UI can show "still computing -- reload"
+  result.daysTotal = days.length;        // how many days the range spans
+  result.daysReady = payloads.length;    // how many are included so far
   return { result, complete };
 }
 
