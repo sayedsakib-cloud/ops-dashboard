@@ -503,17 +503,16 @@ async function computeAndCacheDay(day: string): Promise<RawPayload> {
 async function getTeepByDays(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
-  const startedAt = Date.now();
-  // We compute at most MAX_DAYS missing days per request to stay under the 60s
-  // Hobby limit. A time guard stops us early if the first day was slow, so two
-  // heavy days can never combine to exceed the limit.
-  const MAX_DAYS         = 2;
-  const SLOW_GUARD_MS    = 30_000; // if elapsed exceeds this, don't start another day
+  // Compute exactly ONE missing day per request. A single heavy day (with a large
+  // Pass-3 parts fetch) can take ~40s; two would risk the 60s Hobby limit and
+  // cause timeouts + scattered partial writes. One day is safe and reliable.
+  // Auto-fill on the client walks through remaining days one request at a time.
+  const MAX_DAYS = 1;
 
   const days = listDays(uAfter, uBefore);
   const cachedMap = await readTeepDays(days);
 
-  const missing = days.filter(d => !cachedMap[d]);
+  const missing = days.filter(d => !cachedMap[d]); // already oldest-first
   const payloads: RawPayload[] = [];
 
   // Use cached days first (free)
@@ -521,19 +520,18 @@ async function getTeepByDays(
     if (cachedMap[d]) payloads.push(cachedMap[d] as RawPayload);
   }
 
-  // Compute missing days, bounded by count AND elapsed time.
+  // Compute one missing day (oldest uncached first).
   let complete = missing.length === 0;
   let computed = 0;
   for (const d of missing) {
     if (computed >= MAX_DAYS) { complete = false; break; }
-    // Before starting another day, ensure we have time headroom.
-    if (computed > 0 && Date.now() - startedAt > SLOW_GUARD_MS) { complete = false; break; }
     try {
       const raw = await computeAndCacheDay(d);
       payloads.push(raw);
       computed++;
     } catch {
       complete = false;
+      break;
     }
   }
 
