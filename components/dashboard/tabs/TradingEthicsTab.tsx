@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { Loader2, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -138,11 +138,21 @@ export default function TradingEthicsTab() {
   const [notice,  setNotice]  = useState<string | null>(null);
   const [from,    setFrom]    = useState("");
   const [to,      setTo]      = useState("");
+  const [autoFill, setAutoFill] = useState(true); // auto-reload through missing days
+  const autoRef = useRef(autoFill);
+  autoRef.current = autoFill;
+  // Track the active range so auto-reload refetches the same window.
+  const activeRange = useRef<{ start: string; end: string }>({ start: "", end: "" });
+  // Cap consecutive auto-retries on errors so a persistent failure can't loop forever.
+  const errorRetries = useRef(0);
 
   async function load(start?: string, end?: string) {
-    const key = cacheKey(start ?? "", end ?? "");
+    const s = start ?? "";
+    const e = end ?? "";
+    activeRange.current = { start: s, end: e };
+    const key = cacheKey(s, e);
     const hit = getCached(key);
-    if (hit) { setData(hit); setError(null); setLoading(false); return; }
+    if (hit) { setData(hit); setError(null); setNotice(null); setLoading(false); return; }
 
     setLoading(true); setError(null); setNotice(null);
     try {
@@ -160,22 +170,47 @@ export default function TradingEthicsTab() {
       if (!res.ok || !json) {
         const msg = json?.error
           || (res.status === 504 || res.status === 500
-                ? "This range is still computing on the server. Please wait a moment and reload."
+                ? "The server is still computing this range. It will continue automatically -- please wait."
                 : `Request failed (${res.status}).`);
         throw new Error(msg);
       }
 
       setData(json);
-      setCached(key, json);
-      // If the server could only compute part of the range within its time limit,
-      // show an informational notice (not an error) prompting a reload.
-      if (json.partial) {
+      // Only cache COMPLETE results -- caching a partial would make reloads
+      // return the partial from sessionStorage and never progress.
+      if (!json.partial) {
+        setCached(key, json);
+        setNotice(null);
+        errorRetries.current = 0;
+      } else {
+        errorRetries.current = 0; // making progress, not erroring
         setNotice(
-          `Still building this range: ${json.daysReady ?? 0} of ${json.daysTotal ?? "?"} days ready. ` +
-          `Reload to compute the rest (numbers will climb to the final total).`
+          `Building this range: ${json.daysReady ?? 0} of ${json.daysTotal ?? "?"} days ready` +
+          (autoRef.current
+            ? " -- continuing automatically..."
+            : " -- click Reload to compute more.")
         );
+        // Auto-reload: if enabled and still on the same range, refetch shortly.
+        if (autoRef.current) {
+          setTimeout(() => {
+            if (activeRange.current.start === s && activeRange.current.end === e) {
+              load(start, end);
+            }
+          }, 1500);
+        }
       }
-    } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error");
+      // On a timeout/500, auto-retry a bounded number of times (server mid-compute).
+      if (autoRef.current && errorRetries.current < 10) {
+        errorRetries.current += 1;
+        setTimeout(() => {
+          if (activeRange.current.start === s && activeRange.current.end === e) {
+            load(start, end);
+          }
+        }, 3000);
+      }
+    }
     finally { setLoading(false); }
   }
 
@@ -210,6 +245,23 @@ export default function TradingEthicsTab() {
             {loading ? <><Loader2 className="h-4 w-4 animate-spin" /> Loading</> : "Apply"}
           </Button>
           <Button variant="secondary" onClick={() => { setFrom(""); setTo(""); load(); }} disabled={loading}>Reset</Button>
+          <Button
+            variant="outline"
+            onClick={() => load(activeRange.current.start, activeRange.current.end)}
+            disabled={loading}
+            title="Compute more days for the current range"
+          >
+            Reload
+          </Button>
+          <label className="flex items-center gap-2 text-xs text-muted-foreground select-none">
+            <input
+              type="checkbox"
+              checked={autoFill}
+              onChange={e => setAutoFill(e.target.checked)}
+              className="h-3.5 w-3.5"
+            />
+            Auto-fill days
+          </label>
         </div>
       </Card>
 
