@@ -1,43 +1,38 @@
 import { NextResponse } from "next/server";
+import { getTeepCached, defaultWindows } from "@/app/api/teep/route";
 
-// This route is called by Vercel Cron every 10 minutes.
-// It pre-fetches the default TEEP and Tickets endpoints so the
-// unstable_cache is always warm — users never hit a cold start.
+// Called by Vercel Cron once daily (2 AM UTC). Precomputes the common CLOSED
+// TEEP windows (yesterday, last 7 days, last 30 days) and writes them to the
+// Supabase cache, so the first human viewer of those periods gets an instant hit.
 //
-// Vercel Cron sends a request with the Authorization header containing
-// CRON_SECRET. Add that to your Vercel env vars.
+// We call getTeepCached() DIRECTLY (same process) rather than fetching /api/teep
+// over HTTP -- that avoids the auth middleware entirely and is faster/cleaner.
+// Closed periods never change, so once written they stay valid indefinitely.
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 300; // allow up to 5 min for the cold computes
 
 export async function GET(req: Request) {
-  // Security: only allow Vercel Cron requests
+  // Only allow Vercel Cron (or a caller holding CRON_SECRET).
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const base = process.env.NEXT_PUBLIC_BASE_URL || "https://ops-dashboard-seven-iota.vercel.app";
-
-  const endpoints = [
-    `${base}/api/teep`,
-    `${base}/api/tickets?section=cr`,
-    `${base}/api/tickets?section=bizops`,
-  ];
-
   const results: Record<string, string> = {};
+  const windows = defaultWindows();
 
-  await Promise.all(
-    endpoints.map(async (url) => {
-      const key = url.replace(base, "");
-      try {
-        const res = await fetch(url, { headers: { "x-internal-warm": "1" } });
-        results[key] = res.ok ? `ok (${res.status})` : `error (${res.status})`;
-      } catch (e) {
-        results[key] = `failed: ${e instanceof Error ? e.message : String(e)}`;
-      }
-    })
-  );
-  
+  // Run sequentially -- each compute is heavy; parallel would hammer Intercom.
+  for (const w of windows) {
+    try {
+      const t0 = Date.now();
+      await getTeepCached(w.uAfter, w.uBefore);
+      results[w.label] = `ok (${Math.round((Date.now() - t0) / 1000)}s)`;
+    } catch (e) {
+      results[w.label] = `failed: ${e instanceof Error ? e.message : String(e)}`;
+    }
+  }
+
   return NextResponse.json({ warmed: results, at: new Date().toISOString() });
 }
