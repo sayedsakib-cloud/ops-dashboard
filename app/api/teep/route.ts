@@ -2,14 +2,17 @@ import { NextResponse }    from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions }      from "@/lib/auth";
 import { unstable_cache }   from "next/cache";
-import { readTeepCache, writeTeepCache, readTeepDays, writeTeepDay } from "@/lib/supabase";
+import {
+  readTeepCache, writeTeepCache,
+  readTeepBase,  writeTeepBase,
+  readTeepConvs, writeTeepConvs,
+} from "@/lib/supabase";
 
 const INTERCOM_API  = "https://api.intercom.io";
 const SLA_SECS      = 24 * 3600;
 
-// Large uncached computes page through many Intercom results. Give the function
-// the Hobby-plan maximum (60s). Day buckets keep individual computes small, so
-// this is ample; only a cold multi-day range computes several days in one call.
+// Hobby-plan max. The full-range search + a budgeted slice of parts fit here;
+// remaining parts finish on subsequent (auto-fill) requests.
 export const maxDuration = 60;
 export const dynamic = "force-dynamic";
 
@@ -109,10 +112,19 @@ const getAdmins = unstable_cache(
   { revalidate: 3600 }
 );
 
+// TEEP-matched admins (used in several places).
+async function getTeepAdmins(): Promise<any[]> {
+  const { admins } = await getAdmins();
+  const matched = admins.filter((a: any) =>
+    TEEP_AGENT_NAMES.some(n =>
+      normName(a.name).includes(normName(n)) || normName(n).includes(normName(a.name))
+    )
+  );
+  if (!matched.length) throw new Error("No TEEP agents matched");
+  return matched;
+}
+
 // ── OR-batched multi-team conversation search ─────────────────────────────
-// KEY OPTIMISATION: replaces 14 separate per-team API calls with 3 parallel
-// OR-query batches (groups of 5 teams), reducing concurrent connections from
-// 28 to 6 and eliminating Intercom rate-limit throttling.
 async function fetchConvsAllTeams(
   token: string,
   teamIds: string[],
@@ -125,19 +137,14 @@ async function fetchConvsAllTeams(
     "Content-Type":     "application/json",
     "Intercom-Version": "2.11",
   };
-  const BATCH_SIZE = 5;  // teams per OR clause -- safe below Intercom query depth limit
-  // Real stop condition is cursor === null. PAGE_CAP is only a runaway safety
-  // bound -- high enough to never truncate a real day/range. With day buckets,
-  // a single day rarely exceeds a couple pages, but keep headroom for busy days.
-  const PAGE_CAP   = 1000;
+  const BATCH_SIZE = 5;     // teams per OR clause
+  const PAGE_CAP   = 1000;  // runaway safety; real stop is cursor === null
 
-  // Split team IDs into groups of 5
   const batches: string[][] = [];
   for (let i = 0; i < teamIds.length; i += BATCH_SIZE) {
     batches.push(teamIds.slice(i, i + BATCH_SIZE));
   }
 
-  // Run all batches concurrently (3 batches for 14 teams)
   const batchResults = await Promise.all(
     batches.map(async (bTeams) => {
       const all: any[] = [];
@@ -162,26 +169,15 @@ async function fetchConvsAllTeams(
         const pagination: any = { per_page: 150 };
         if (cursor) pagination.starting_after = cursor;
 
-        // Retry transient Intercom errors (429/5xx) with backoff so a single
-        // hiccup on one page doesn't crash the entire day's compute.
-        let res: Response | null = null;
-        let lastErr = "";
-        for (let attempt = 0; attempt < 4; attempt++) {
-          res = await fetch(`${INTERCOM_API}/conversations/search`, {
-            method:  "POST",
-            headers: HDRS,
-            body:    JSON.stringify({ query, pagination }),
-            next:    { revalidate: 300 },
-          });
-          if (res.ok) break;
-          lastErr = `Intercom ${res.status}`;
-          // Only retry on rate-limit / server errors; client errors won't improve.
-          if (res.status !== 429 && res.status < 500) break;
-          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
-        }
-        if (!res || !res.ok) {
-          // Give up on this page after retries; skip rather than crash the day.
-          break;
+        const res = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method:  "POST",
+          headers: HDRS,
+          body:    JSON.stringify({ query, pagination }),
+          next:    { revalidate: 300 },
+        });
+        if (!res.ok) {
+          const t = await res.text();
+          throw new Error(`Intercom ${res.status}: ${t}`);
         }
         const data = await res.json();
         for (const c of (data.conversations ?? [])) {
@@ -194,7 +190,6 @@ async function fetchConvsAllTeams(
     })
   );
 
-  // Merge results from all batches, deduplicating by conversation ID
   const merged: any[] = [];
   const seen = new Set<string>();
   for (const batch of batchResults) {
@@ -205,10 +200,10 @@ async function fetchConvsAllTeams(
   return merged;
 }
 
-// ── Parts fetch for unattributed / re-closed conversations ────────────────
-async function fetchCloseParts(
-  token: string, convId: string, uAfter: number, uBefore: number,
-): Promise<Array<{ adminId: string; closedAt: number }>> {
+// ── ALL admin close events for one conversation (no window filter) ─────────
+// Cached per conversation in Supabase; window filtering happens at aggregation.
+type CloseEvent = { adminId: string; closedAt: number };
+async function fetchAllCloseEvents(token: string, convId: string): Promise<CloseEvent[]> {
   const res = await fetch(`${INTERCOM_API}/conversations/${convId}`, {
     headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
     next: { revalidate: 300 },
@@ -216,28 +211,22 @@ async function fetchCloseParts(
   if (!res.ok) return [];
   const data  = await res.json();
   const parts = data.conversation_parts?.conversation_parts ?? [];
-  const events: Array<{ adminId: string; closedAt: number }> = [];
+  const events: CloseEvent[] = [];
   for (const part of parts) {
-    if (
-      part.part_type   === "close"  &&
-      part.author?.type === "admin" &&
-      part.created_at  >= uAfter   &&
-      part.created_at  <= uBefore
-    ) {
+    if (part.part_type === "close" && part.author?.type === "admin") {
       events.push({ adminId: String(part.author.id), closedAt: part.created_at });
     }
   }
-  return events;
+  return events; // chronological, as Intercom returns them
 }
 
-// ── Raw per-agent accumulator type (the additive building block) ──────────
+// ── Per-agent accumulator ─────────────────────────────────────────────────
 type RawAcc = {
   name: string;
   assigned: number; repliedTo: number; closed: number;
   frtSum: number; frtN: number; handlingSum: number; handlingN: number;
   atfSum: number; atfN: number; slaMet: number; slaTotal: number;
 };
-// Raw payload for a day/range: agentId -> RawAcc. Fully additive across days.
 type RawPayload = Record<string, RawAcc>;
 
 function emptyRaw(name: string): RawAcc {
@@ -246,154 +235,165 @@ function emptyRaw(name: string): RawAcc {
            atfSum:0, atfN:0, slaMet:0, slaTotal:0 };
 }
 
-// ── RAW accumulation for a single window (the expensive Intercom work) ─────
-// Returns per-agent additive accumulators (sums + counts), NOT finalized
-// averages. Used both for single-day buckets and (via wrapper) full ranges.
-async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> {
-    const token = process.env.INTERCOM_ACCESS_TOKEN!;
+// ── Base state: search + Pass 1/2 over the FULL range (no parts) ───────────
+// `agents` already includes attributed (parts-free) closes. `needsParts` are
+// the conversations whose close attribution requires a parts fetch (Pass 3).
+type BaseState = { agents: RawPayload; needsParts: string[]; closeCounted: string[] };
 
-    const [crTeams, { admins }] = await Promise.all([getCRTeams(), getAdmins()]);
-    if (!crTeams.length) throw new Error("No CR teams found");
+async function computeBase(uAfter: number, uBefore: number): Promise<BaseState> {
+  const token = process.env.INTERCOM_ACCESS_TOKEN!;
+  const [crTeams, teepAdmins] = await Promise.all([getCRTeams(), getTeepAdmins()]);
+  if (!crTeams.length) throw new Error("No CR teams found");
 
-    const teepAdmins = admins.filter((a: any) =>
-      TEEP_AGENT_NAMES.some(n =>
-        normName(a.name).includes(normName(n)) || normName(n).includes(normName(a.name))
-      )
-    );
-    if (!teepAdmins.length) throw new Error("No TEEP agents matched");
+  const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
+  const teamIds        = crTeams.map(t => t.id);
 
-    const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
-    const teamIds        = crTeams.map(t => t.id);
+  const [activityConvs, closedOnlyRaw] = await Promise.all([
+    fetchConvsAllTeams(token, teamIds, "updated_at",               uAfter, uBefore),
+    fetchConvsAllTeams(token, teamIds, "statistics.last_close_at", uAfter, uBefore),
+  ]);
 
-    const [activityConvs, closedOnlyRaw] = await Promise.all([
-      fetchConvsAllTeams(token, teamIds, "updated_at",               uAfter, uBefore),
-      fetchConvsAllTeams(token, teamIds, "statistics.last_close_at", uAfter, uBefore),
-    ]);
+  const activityIds     = new Set(activityConvs.map((c: any) => c.id));
+  const closedOnlyConvs = closedOnlyRaw.filter((c: any) => !activityIds.has(c.id));
 
-    const activityIds     = new Set(activityConvs.map((c: any) => c.id));
-    const closedOnlyConvs = closedOnlyRaw.filter((c: any) => !activityIds.has(c.id));
+  const agentMap = new Map<string, RawAcc>();
+  teepAdmins.forEach((a: any) =>
+    agentMap.set(String(a.id), emptyRaw(decodeName(a.name ?? String(a.id))))
+  );
 
-    const agentMap = new Map<string, RawAcc>();
-    teepAdmins.forEach((a: any) =>
-      agentMap.set(String(a.id), emptyRaw(decodeName(a.name ?? String(a.id))))
-    );
+  const closeCounted = new Set<string>();
+  const needsParts   = new Set<string>();
 
-    const closeCounted = new Set<string>();
-    const needsParts   = new Set<string>();
+  // Pass 1: activity conversations -- full metrics
+  for (const c of activityConvs) {
+    const stats       = c.statistics ?? {};
+    const adminReply  = stats.time_to_admin_reply ?? 0;
+    const handling    = stats.time_to_first_close ?? 0;
+    const assignment  = stats.time_to_assignment  ?? 0;
+    const lastCloseAt = stats.last_close_at        ?? 0;
+    const countReopens= stats.count_reopens        ?? 0;
 
-    // Pass 1: activity conversations -- full metrics
-    for (const c of activityConvs) {
-     try {
-      const stats       = c.statistics ?? {};
-      const adminReply  = stats.time_to_admin_reply ?? 0;
-      const handling    = stats.time_to_first_close ?? 0;
-      const assignment  = stats.time_to_assignment  ?? 0;
-      const lastCloseAt = stats.last_close_at        ?? 0;
-      const countReopens= stats.count_reopens        ?? 0;
-
-      if (c.admin_assignee_id && teepAdminIdSet.has(String(c.admin_assignee_id))) {
-        const a = agentMap.get(String(c.admin_assignee_id));
-        if (a) a.assigned++;
-      }
-
-      const replierIds = resolveAgent(c, teepAdminIdSet, "all");
-      for (const rid of replierIds) {
-        const acc = agentMap.get(rid);
-        if (!acc) continue;
-        if (adminReply > 0) {
-          acc.repliedTo++;
-          acc.slaTotal++;
-          if (adminReply <= SLA_SECS) acc.slaMet++;
-          acc.frtSum += adminReply; acc.frtN++;
-          const atf = adminReply - Math.max(0, assignment);
-          if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
-        }
-        if (handling > 0 && adminReply > 0 && handling > adminReply) {
-          acc.handlingSum += handling - adminReply; acc.handlingN++;
-        } else if (handling > 0 && adminReply === 0) {
-          acc.handlingSum += handling; acc.handlingN++;
-        }
-      }
-
-      const closedInPeriod = lastCloseAt > 0
-        ? (lastCloseAt >= uAfter && lastCloseAt <= uBefore)
-        : (c.state === "closed" || c.state === "resolved");
-
-      if (closedInPeriod) {
-        const closerIds = resolveAgent(c, teepAdminIdSet, "single");
-        if (closerIds.length > 0) {
-          const a = agentMap.get(closerIds[0]);
-          if (a) { a.closed++; closeCounted.add(c.id); }
-          if (countReopens > 0) needsParts.add(c.id);
-        } else {
-          needsParts.add(c.id);
-        }
-      }
-     } catch { /* skip a single malformed conversation, never crash the day */ }
+    if (c.admin_assignee_id && teepAdminIdSet.has(String(c.admin_assignee_id))) {
+      agentMap.get(String(c.admin_assignee_id))!.assigned++;
     }
 
-    // Pass 2: closed-only extras (closed then reopened, missed by updated_at)
-    for (const c of closedOnlyConvs) {
-     try {
-      const countReopens = c.statistics?.count_reopens ?? 0;
-      const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
+    const replierIds = resolveAgent(c, teepAdminIdSet, "all");
+    for (const rid of replierIds) {
+      const acc = agentMap.get(rid)!;
+      if (adminReply > 0) {
+        acc.repliedTo++;
+        acc.slaTotal++;
+        if (adminReply <= SLA_SECS) acc.slaMet++;
+        acc.frtSum += adminReply; acc.frtN++;
+        const atf = adminReply - Math.max(0, assignment);
+        if (atf > 0) { acc.atfSum += atf; acc.atfN++; }
+      }
+      if (handling > 0 && adminReply > 0 && handling > adminReply) {
+        acc.handlingSum += handling - adminReply; acc.handlingN++;
+      } else if (handling > 0 && adminReply === 0) {
+        acc.handlingSum += handling; acc.handlingN++;
+      }
+    }
+
+    const closedInPeriod = lastCloseAt > 0
+      ? (lastCloseAt >= uAfter && lastCloseAt <= uBefore)
+      : (c.state === "closed" || c.state === "resolved");
+
+    if (closedInPeriod) {
+      const closerIds = resolveAgent(c, teepAdminIdSet, "single");
       if (closerIds.length > 0) {
-        const a = agentMap.get(closerIds[0]);
-        if (a) { a.closed++; closeCounted.add(c.id); }
+        agentMap.get(closerIds[0])!.closed++;
+        closeCounted.add(c.id);
         if (countReopens > 0) needsParts.add(c.id);
       } else {
         needsParts.add(c.id);
       }
-     } catch { /* skip malformed */ }
-    }
-
-    // Pass 3: batch-fetch parts for unattributed + re-close events
-    if (needsParts.size > 0) {
-      const ids   = [...needsParts];
-      const BATCH = 30;
-      for (let i = 0; i < ids.length; i += BATCH) {
-        try {
-          const batch   = ids.slice(i, i + BATCH);
-          const results = await Promise.all(
-            batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
-          );
-          for (let j = 0; j < batch.length; j++) {
-            const convId = batch[j];
-            const events = results[j];
-            const already = closeCounted.has(convId);
-            for (let k = 0; k < events.length; k++) {
-              const { adminId } = events[k];
-              if (!teepAdminIdSet.has(adminId)) continue;
-              const a = agentMap.get(adminId);
-              if (a && (!already || k > 0)) a.closed++;
-            }
-          }
-        } catch { /* skip a failed parts batch, keep the rest of the day */ }
-      }
-    }
-
-    // Return raw accumulators keyed by agent id (serializable, additive)
-    const payload: RawPayload = {};
-    for (const [id, acc] of agentMap.entries()) payload[id] = acc;
-    return payload;
-}
-
-// ── Merge raw payloads (component-wise add) -- the heart of additivity ─────
-function mergeRaw(payloads: RawPayload[]): RawPayload {
-  const out: RawPayload = {};
-  for (const p of payloads) {
-    for (const [id, acc] of Object.entries(p)) {
-      if (!out[id]) out[id] = emptyRaw(acc.name);
-      const o = out[id];
-      o.assigned += acc.assigned; o.repliedTo += acc.repliedTo; o.closed += acc.closed;
-      o.frtSum += acc.frtSum; o.frtN += acc.frtN;
-      o.handlingSum += acc.handlingSum; o.handlingN += acc.handlingN;
-      o.atfSum += acc.atfSum; o.atfN += acc.atfN;
-      o.slaMet += acc.slaMet; o.slaTotal += acc.slaTotal;
-      if (!o.name && acc.name) o.name = acc.name;
     }
   }
-  return out;
+
+  // Pass 2: closed-only extras (closed then reopened, missed by updated_at)
+  for (const c of closedOnlyConvs) {
+    const countReopens = c.statistics?.count_reopens ?? 0;
+    const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
+    if (closerIds.length > 0) {
+      agentMap.get(closerIds[0])!.closed++;
+      closeCounted.add(c.id);
+      if (countReopens > 0) needsParts.add(c.id);
+    } else {
+      needsParts.add(c.id);
+    }
+  }
+
+  const agents: RawPayload = {};
+  for (const [id, acc] of agentMap.entries()) agents[id] = acc;
+  return { agents, needsParts: [...needsParts], closeCounted: [...closeCounted] };
+}
+
+// ── Pass 3: apply parts-level close events over the FULL range ─────────────
+// useCache=true  -> read/write teep_conv and honour a wall-clock budget
+// useCache=false -> live fallback: fetch everything, no budget, no cache
+async function applyParts(
+  base: BaseState,
+  uAfter: number,
+  uBefore: number,
+  teepAdminIdSet: Set<string>,
+  opts: { useCache: boolean; budgetMs?: number; startedAt?: number },
+): Promise<{ agents: RawPayload; complete: boolean; ready: number; total: number }> {
+  // Clone base (it is pre-Pass-3, so applying Pass 3 here is idempotent).
+  const agentMap = new Map<string, RawAcc>();
+  for (const [id, acc] of Object.entries(base.agents)) agentMap.set(id, { ...acc });
+
+  const closeCountedSet = new Set(base.closeCounted);
+  const needs           = base.needsParts;
+  const total           = needs.length;
+  const token           = process.env.INTERCOM_ACCESS_TOKEN!;
+
+  const allParts: Record<string, CloseEvent[]> = {};
+  if (opts.useCache) {
+    const cached = await readTeepConvs(needs);
+    for (const id of needs) if (cached[id]) allParts[id] = cached[id];
+  }
+
+  const uncached = needs.filter(id => allParts[id] === undefined);
+  const BATCH    = 30;
+  const budgetMs = opts.budgetMs ?? Infinity;
+  const started  = opts.startedAt ?? Date.now();
+
+  for (let i = 0; i < uncached.length; i += BATCH) {
+    if (Date.now() - started > budgetMs) break;            // time guard (no-op when Infinity)
+    const batch   = uncached.slice(i, i + BATCH);
+    const results = await Promise.all(batch.map(id => fetchAllCloseEvents(token, id)));
+    for (let j = 0; j < batch.length; j++) allParts[batch[j]] = results[j];
+    if (opts.useCache) {
+      await writeTeepConvs(batch.map((id, j) => ({ convId: id, closes: results[j] })));
+    }
+  }
+
+  const ready    = needs.filter(id => allParts[id] !== undefined).length;
+  const complete = ready >= total;
+
+  // Count in-window close events. Mirrors the original windowed Pass-3 logic:
+  // k indexes ALL admin close events in window (chronological); non-teep are
+  // skipped but still advance k; the first close of an already-counted
+  // conversation is the one Pass 1/2 attributed, so it is exempted (k===0).
+  for (const convId of needs) {
+    const events = allParts[convId];
+    if (!events) continue;                                 // not resolved yet
+    const windowEvents = events.filter(e => e.closedAt >= uAfter && e.closedAt <= uBefore);
+    const already = closeCountedSet.has(convId);
+    for (let k = 0; k < windowEvents.length; k++) {
+      const adminId = windowEvents[k].adminId;
+      if (!teepAdminIdSet.has(adminId)) continue;
+      if (!already || k > 0) {
+        const acc = agentMap.get(adminId);
+        if (acc) acc.closed++;
+      }
+    }
+  }
+
+  const agents: RawPayload = {};
+  for (const [id, acc] of agentMap.entries()) agents[id] = acc;
+  return { agents, complete, ready, total };
 }
 
 // ── Finalize raw accumulators into the API result shape ───────────────────
@@ -471,141 +471,100 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
   };
 }
 
-// ── Full-range compute (legacy path): raw over the whole window, then finalize.
-// Used as the period-key cache fill and the Supabase-down fallback.
-async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
-  const raw = await computeRaw(uAfter, uBefore);
-  return finalize(raw, uAfter, uBefore);
-}
-
-// ── Period key: stable identifier for a closed date range ─────────────────
-// Uses the UTC calendar dates of the window bounds, so the same period always
-// maps to the same Supabase row regardless of the exact second requested.
+// ── Period key (Dhaka calendar dates, matches the user's selected range) ───
 function periodKey(uAfter: number, uBefore: number): string {
-  // Use +06 (Dhaka) calendar dates so the key matches the user's selected range
-  // (toISOString() would shift to UTC and roll the start date back a day).
   const a = new Date(uAfter * 1000 + 6 * 3600 * 1000).toISOString().slice(0, 10);
   const b = new Date(uBefore * 1000 + 6 * 3600 * 1000).toISOString().slice(0, 10);
   return `${a}_${b}`;
 }
 
-// ── Day helpers for the bucket model ──────────────────────────────────────
-// List the +06 (Dhaka) calendar day strings covered by [uAfter, uBefore].
-function listDays(uAfter: number, uBefore: number): string[] {
-  const days: string[] = [];
-  // Convert bounds to Dhaka day strings.
-  const startMs = uAfter * 1000;
-  const endMs   = uBefore * 1000;
-  const d = new Date(startMs + 6 * 3600 * 1000);
-  let cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-  const endD = new Date(endMs + 6 * 3600 * 1000);
-  const endDay = Date.UTC(endD.getUTCFullYear(), endD.getUTCMonth(), endD.getUTCDate());
-  while (cur <= endDay) {
-    days.push(new Date(cur).toISOString().slice(0, 10));
-    cur += 86400 * 1000;
-  }
-  return days;
+// ── Live fallback: full compute in one pass (no caching layer) ─────────────
+async function computeTeepLive(uAfter: number, uBefore: number): Promise<any> {
+  const base = await computeBase(uAfter, uBefore);
+  const teepAdmins = await getTeepAdmins();
+  const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
+  const { agents } = await applyParts(base, uAfter, uBefore, teepAdminIdSet, { useCache: false });
+  return finalize(agents, uAfter, uBefore);
 }
 
-// Compute one day's raw accumulator and cache it. day = "YYYY-MM-DD" (Dhaka).
-async function computeAndCacheDay(day: string): Promise<RawPayload> {
-  const uAfter  = toUnixStart(day);
-  const uBefore = toUnixEnd(day);
-  const raw = await computeRaw(uAfter, uBefore);
-  await writeTeepDay(day, raw);
-  return raw;
-}
-
-// Assemble a range from per-day buckets. Reads cached days, computes missing
-// ones (bounded so a cold large range doesn't exceed the function timeout),
-// merges, finalizes. Returns { result, complete } -- complete=false means some
-// days couldn't be computed in this request and will fill in on a later load.
-async function getTeepByDays(
+// ── Resumable range compute: cached base + incremental per-conv parts ──────
+async function getTeepByConvs(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
-  const MAX_DAYS = 1; // compute one missing day per request (60s Hobby safety)
+  const started   = Date.now();
+  const BUDGET_MS = 45000;                 // return before the 60s cap
+  const key       = periodKey(uAfter, uBefore);
 
-  const days = listDays(uAfter, uBefore);
-  const cachedMap = await readTeepDays(days);
-
-  const payloads: RawPayload[] = [];
-  const cachedDays: string[] = [];
-  // Always include every cached day first -- these are free and must never be
-  // dropped just because a later compute fails.
-  for (const d of days) {
-    if (cachedMap[d]) { payloads.push(cachedMap[d] as RawPayload); cachedDays.push(d); }
+  // 1. Base (search + Pass 1/2): reuse cached, else compute once and cache.
+  let base = (await readTeepBase(key)) as BaseState | null;
+  if (!base) {
+    base = await computeBase(uAfter, uBefore);
+    await writeTeepBase(key, base);
   }
 
-  const missing = days.filter(d => !cachedMap[d]); // oldest-first
-  const failedDays: string[] = [];
-  let computed = 0;
-  for (const d of missing) {
-    if (computed >= MAX_DAYS) break;
-    try {
-      const raw = await computeAndCacheDay(d);
-      payloads.push(raw);
-      computed++;
-    } catch (err) {
-      // Record the failure but DO NOT break out with cached data lost. Move on;
-      // the cached days are already in payloads and will still be summed.
-      failedDays.push(d);
-      computed++; // count the attempt so we still return promptly (one day/req)
-    }
-  }
+  // 2. Pass 3 from the per-conversation parts cache, within the time budget.
+  const teepAdmins     = await getTeepAdmins();
+  const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
+  const { agents, complete, ready, total } = await applyParts(
+    base, uAfter, uBefore, teepAdminIdSet,
+    { useCache: true, budgetMs: BUDGET_MS, startedAt: started },
+  );
 
-  const complete = missing.length === 0;
-
-  const merged = mergeRaw(payloads);
-  const result = finalize(merged, uAfter, uBefore);
-  result.partial    = !complete;
-  result.daysTotal  = days.length;
-  result.daysReady  = cachedDays.length + (computed - failedDays.length);
-  result.daysFailed = failedDays;          // surfaced for debugging a bad day
-  result.firstMissing = missing[0] ?? null;
+  const result = finalize(agents, uAfter, uBefore);
+  result.partial = !complete;
+  result.ready   = ready;   // conversations whose close attribution is resolved
+  result.total   = total;   // conversations needing parts-level attribution
   return { result, complete };
 }
 
-// ── Cache-first wrapper ───────────────────────────────────────────────────
-// Strategy:
-//   1. Try the exact period-key cache (fastest for repeated identical queries).
-//   2. Otherwise assemble from per-day buckets (additive, never truncates).
-//   3. If a range is fully assembled from days, also store it under its
-//      period-key so the next identical query is a one-read hit.
-//   4. If Supabase is unconfigured/unreachable, fall back to a live full compute.
-// Exported so the cron warmer can call it directly (no HTTP / no auth needed).
+// ── Self-healing guard ─────────────────────────────────────────────────────
+// A cached row is only honoured if it actually has data. This makes an empty /
+// poisoned cache row (which previously pinned a range to "no data" forever)
+// self-correct: it is ignored on read and recomputed, and never written.
+function isUsableResult(r: any): boolean {
+  return !!(
+    r &&
+    r.summary &&
+    typeof r.summary.totalClosed === "number" &&
+    r.summary.totalClosed > 0 &&
+    Array.isArray(r.agents) &&
+    r.agents.length > 0
+  );
+}
+
+// ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
+  // No Supabase configured -> live compute (no caching; slower for big ranges).
+  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return await computeTeepLive(uAfter, uBefore);
+  }
+
   const key = periodKey(uAfter, uBefore);
 
-  // 1. Exact period-key cache (only trust it for COMPLETE results)
+  // 1. Finished range cached -> instant. Ignore empty/poisoned rows and recompute.
   const cached = await readTeepCache(key);
-  if (cached) return cached;
+  if (isUsableResult(cached)) return cached;
 
-  // 2. Assemble from day buckets
+  // 2. Build incrementally from cached base + per-conversation parts.
   try {
-    const { result, complete } = await getTeepByDays(uAfter, uBefore);
-    // 3. Cache complete ranges under the period key for instant repeat hits
-    if (complete) await writeTeepCache(key, result);
+    const { result, complete } = await getTeepByConvs(uAfter, uBefore);
+    // Only freeze a finished range that actually has data -- never cache an empty.
+    if (complete && isUsableResult(result)) await writeTeepCache(key, result);
     return result;
   } catch {
-    // 4. Fallback: live full-range compute (Supabase down or day path failed)
-    const fresh = await computeTeep(uAfter, uBefore);
-    await writeTeepCache(key, fresh);
-    return fresh;
+    // 3. Pipeline/Supabase failure -> degrade to a live full compute.
+    return await computeTeepLive(uAfter, uBefore);
   }
 }
 
-// ── Cron helper: compute & cache yesterday's single day bucket ────────────
+// ── Cron helper: warm yesterday's range ───────────────────────────────────
 export async function warmYesterdayDay(): Promise<void> {
-  const dhakaNow = new Date(Date.now() + 6 * 3600 * 1000);
-  const y = new Date(Date.UTC(
-    dhakaNow.getUTCFullYear(), dhakaNow.getUTCMonth(), dhakaNow.getUTCDate() - 1
-  )).toISOString().slice(0, 10);
-  await computeAndCacheDay(y);
+  const y = defaultWindows().find(w => w.label === "yesterday")!;
+  await getTeepCached(y.uAfter, y.uBefore);
 }
 
-// ── Default precompute windows (used by the cron warmer) ──────────────────
+// ── Default precompute windows (used by the cron warmer) ───────────────────
 // All windows END YESTERDAY in +06 (Dhaka), since we never view today.
-// Returns unix-second [after, before] pairs for: yesterday (1d), last 7d, last 30d.
 export function defaultWindows(): Array<{ label: string; uAfter: number; uBefore: number }> {
   const dhakaNow = new Date(Date.now() + 6 * 3600 * 1000);
   const Y = dhakaNow.getUTCFullYear();
@@ -635,8 +594,7 @@ export async function GET(req: Request) {
     if (!process.env.INTERCOM_ACCESS_TOKEN)
       throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
-    // Default (no params) = last 7 completed days ending yesterday, matching the
-    // cron's "last7" window so the default view is always a pre-warmed cache hit.
+    // Default (no params) = last 7 completed days ending yesterday.
     const last7 = defaultWindows().find(w => w.label === "last7")!;
     const uAfter  = startDate ? toUnixStart(startDate) : last7.uAfter;
     const uBefore = endDate   ? toUnixEnd(endDate)     : last7.uBefore;
