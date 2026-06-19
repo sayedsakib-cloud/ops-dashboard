@@ -162,15 +162,26 @@ async function fetchConvsAllTeams(
         const pagination: any = { per_page: 150 };
         if (cursor) pagination.starting_after = cursor;
 
-        const res = await fetch(`${INTERCOM_API}/conversations/search`, {
-          method:  "POST",
-          headers: HDRS,
-          body:    JSON.stringify({ query, pagination }),
-          next:    { revalidate: 300 },
-        });
-        if (!res.ok) {
-          const t = await res.text();
-          throw new Error(`Intercom ${res.status}: ${t}`);
+        // Retry transient Intercom errors (429/5xx) with backoff so a single
+        // hiccup on one page doesn't crash the entire day's compute.
+        let res: Response | null = null;
+        let lastErr = "";
+        for (let attempt = 0; attempt < 4; attempt++) {
+          res = await fetch(`${INTERCOM_API}/conversations/search`, {
+            method:  "POST",
+            headers: HDRS,
+            body:    JSON.stringify({ query, pagination }),
+            next:    { revalidate: 300 },
+          });
+          if (res.ok) break;
+          lastErr = `Intercom ${res.status}`;
+          // Only retry on rate-limit / server errors; client errors won't improve.
+          if (res.status !== 429 && res.status < 500) break;
+          await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+        }
+        if (!res || !res.ok) {
+          // Give up on this page after retries; skip rather than crash the day.
+          break;
         }
         const data = await res.json();
         for (const c of (data.conversations ?? [])) {
@@ -272,6 +283,7 @@ async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> 
 
     // Pass 1: activity conversations -- full metrics
     for (const c of activityConvs) {
+     try {
       const stats       = c.statistics ?? {};
       const adminReply  = stats.time_to_admin_reply ?? 0;
       const handling    = stats.time_to_first_close ?? 0;
@@ -280,12 +292,14 @@ async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> 
       const countReopens= stats.count_reopens        ?? 0;
 
       if (c.admin_assignee_id && teepAdminIdSet.has(String(c.admin_assignee_id))) {
-        agentMap.get(String(c.admin_assignee_id))!.assigned++;
+        const a = agentMap.get(String(c.admin_assignee_id));
+        if (a) a.assigned++;
       }
 
       const replierIds = resolveAgent(c, teepAdminIdSet, "all");
       for (const rid of replierIds) {
-        const acc = agentMap.get(rid)!;
+        const acc = agentMap.get(rid);
+        if (!acc) continue;
         if (adminReply > 0) {
           acc.repliedTo++;
           acc.slaTotal++;
@@ -308,26 +322,29 @@ async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> 
       if (closedInPeriod) {
         const closerIds = resolveAgent(c, teepAdminIdSet, "single");
         if (closerIds.length > 0) {
-          agentMap.get(closerIds[0])!.closed++;
-          closeCounted.add(c.id);
+          const a = agentMap.get(closerIds[0]);
+          if (a) { a.closed++; closeCounted.add(c.id); }
           if (countReopens > 0) needsParts.add(c.id);
         } else {
           needsParts.add(c.id);
         }
       }
+     } catch { /* skip a single malformed conversation, never crash the day */ }
     }
 
     // Pass 2: closed-only extras (closed then reopened, missed by updated_at)
     for (const c of closedOnlyConvs) {
+     try {
       const countReopens = c.statistics?.count_reopens ?? 0;
       const closerIds    = resolveAgent(c, teepAdminIdSet, "single");
       if (closerIds.length > 0) {
-        agentMap.get(closerIds[0])!.closed++;
-        closeCounted.add(c.id);
+        const a = agentMap.get(closerIds[0]);
+        if (a) { a.closed++; closeCounted.add(c.id); }
         if (countReopens > 0) needsParts.add(c.id);
       } else {
         needsParts.add(c.id);
       }
+     } catch { /* skip malformed */ }
     }
 
     // Pass 3: batch-fetch parts for unattributed + re-close events
@@ -335,20 +352,23 @@ async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> 
       const ids   = [...needsParts];
       const BATCH = 30;
       for (let i = 0; i < ids.length; i += BATCH) {
-        const batch   = ids.slice(i, i + BATCH);
-        const results = await Promise.all(
-          batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
-        );
-        for (let j = 0; j < batch.length; j++) {
-          const convId = batch[j];
-          const events = results[j];
-          const already = closeCounted.has(convId);
-          for (let k = 0; k < events.length; k++) {
-            const { adminId } = events[k];
-            if (!teepAdminIdSet.has(adminId)) continue;
-            if (!already || k > 0) agentMap.get(adminId)!.closed++;
+        try {
+          const batch   = ids.slice(i, i + BATCH);
+          const results = await Promise.all(
+            batch.map(id => fetchCloseParts(token, id, uAfter, uBefore))
+          );
+          for (let j = 0; j < batch.length; j++) {
+            const convId = batch[j];
+            const events = results[j];
+            const already = closeCounted.has(convId);
+            for (let k = 0; k < events.length; k++) {
+              const { adminId } = events[k];
+              if (!teepAdminIdSet.has(adminId)) continue;
+              const a = agentMap.get(adminId);
+              if (a && (!already || k > 0)) a.closed++;
+            }
           }
-        }
+        } catch { /* skip a failed parts batch, keep the rest of the day */ }
       }
     }
 
@@ -503,43 +523,45 @@ async function computeAndCacheDay(day: string): Promise<RawPayload> {
 async function getTeepByDays(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
-  // Compute exactly ONE missing day per request. A single heavy day (with a large
-  // Pass-3 parts fetch) can take ~40s; two would risk the 60s Hobby limit and
-  // cause timeouts + scattered partial writes. One day is safe and reliable.
-  // Auto-fill on the client walks through remaining days one request at a time.
-  const MAX_DAYS = 1;
+  const MAX_DAYS = 1; // compute one missing day per request (60s Hobby safety)
 
   const days = listDays(uAfter, uBefore);
   const cachedMap = await readTeepDays(days);
 
-  const missing = days.filter(d => !cachedMap[d]); // already oldest-first
   const payloads: RawPayload[] = [];
-
-  // Use cached days first (free)
+  const cachedDays: string[] = [];
+  // Always include every cached day first -- these are free and must never be
+  // dropped just because a later compute fails.
   for (const d of days) {
-    if (cachedMap[d]) payloads.push(cachedMap[d] as RawPayload);
+    if (cachedMap[d]) { payloads.push(cachedMap[d] as RawPayload); cachedDays.push(d); }
   }
 
-  // Compute one missing day (oldest uncached first).
-  let complete = missing.length === 0;
+  const missing = days.filter(d => !cachedMap[d]); // oldest-first
+  const failedDays: string[] = [];
   let computed = 0;
   for (const d of missing) {
-    if (computed >= MAX_DAYS) { complete = false; break; }
+    if (computed >= MAX_DAYS) break;
     try {
       const raw = await computeAndCacheDay(d);
       payloads.push(raw);
       computed++;
-    } catch {
-      complete = false;
-      break;
+    } catch (err) {
+      // Record the failure but DO NOT break out with cached data lost. Move on;
+      // the cached days are already in payloads and will still be summed.
+      failedDays.push(d);
+      computed++; // count the attempt so we still return promptly (one day/req)
     }
   }
 
+  const complete = missing.length === 0;
+
   const merged = mergeRaw(payloads);
   const result = finalize(merged, uAfter, uBefore);
-  result.partial = !complete;            // UI shows "still computing -- reload"
-  result.daysTotal = days.length;        // how many days the range spans
-  result.daysReady = payloads.length;    // how many are included so far
+  result.partial    = !complete;
+  result.daysTotal  = days.length;
+  result.daysReady  = cachedDays.length + (computed - failedDays.length);
+  result.daysFailed = failedDays;          // surfaced for debugging a bad day
+  result.firstMissing = missing[0] ?? null;
   return { result, complete };
 }
 
