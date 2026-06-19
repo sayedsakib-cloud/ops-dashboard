@@ -135,6 +135,7 @@ export default function TradingEthicsTab() {
   const [data,    setData]    = useState<TeepData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error,   setError]   = useState<string | null>(null);
+  const [notice,  setNotice]  = useState<string | null>(null);
   const [from,    setFrom]    = useState("");
   const [to,      setTo]      = useState("");
 
@@ -143,16 +144,37 @@ export default function TradingEthicsTab() {
     const hit = getCached(key);
     if (hit) { setData(hit); setError(null); setLoading(false); return; }
 
-    setLoading(true); setError(null);
+    setLoading(true); setError(null); setNotice(null);
     try {
       const p = new URLSearchParams();
       if (start) p.set("startDate", start);
       if (end)   p.set("endDate",   end);
       const res  = await fetch("/api/teep" + (p.toString() ? "?" + p.toString() : ""));
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed");
+
+      // Read as text first so a non-JSON response (e.g. a timeout error page)
+      // doesn't crash JSON.parse with "Unexpected token".
+      const text = await res.text();
+      let json: any = null;
+      try { json = JSON.parse(text); } catch { json = null; }
+
+      if (!res.ok || !json) {
+        const msg = json?.error
+          || (res.status === 504 || res.status === 500
+                ? "This range is still computing on the server. Please wait a moment and reload."
+                : `Request failed (${res.status}).`);
+        throw new Error(msg);
+      }
+
       setData(json);
       setCached(key, json);
+      // If the server could only compute part of the range within its time limit,
+      // show an informational notice (not an error) prompting a reload.
+      if (json.partial) {
+        setNotice(
+          `Still building this range: ${json.daysReady ?? 0} of ${json.daysTotal ?? "?"} days ready. ` +
+          `Reload to compute the rest (numbers will climb to the final total).`
+        );
+      }
     } catch (e) { setError(e instanceof Error ? e.message : "Error"); }
     finally { setLoading(false); }
   }
@@ -204,6 +226,12 @@ export default function TradingEthicsTab() {
       {error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-4 text-sm text-destructive">
           <strong>Error:</strong> {error}
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-4 text-sm text-amber-700 dark:text-amber-400">
+          {notice}
         </div>
       ) : null}
 
