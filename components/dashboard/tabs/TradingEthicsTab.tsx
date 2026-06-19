@@ -145,6 +145,8 @@ export default function TradingEthicsTab() {
   const activeRange = useRef<{ start: string; end: string }>({ start: "", end: "" });
   // Cap consecutive auto-retries on errors so a persistent failure can't loop forever.
   const errorRetries = useRef(0);
+  // Mirror of `data` for use inside async closures (state is stale there).
+  const dataRef = useRef<TeepData | null>(null);
 
   async function load(start?: string, end?: string) {
     const s = start ?? "";
@@ -176,6 +178,7 @@ export default function TradingEthicsTab() {
       }
 
       setData(json);
+      dataRef.current = json;
       // Only cache COMPLETE results -- caching a partial would make reloads
       // return the partial from sessionStorage and never progress.
       if (!json.partial) {
@@ -200,15 +203,35 @@ export default function TradingEthicsTab() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Error");
-      // On a timeout/500, auto-retry a bounded number of times (server mid-compute).
-      if (autoRef.current && errorRetries.current < 10) {
+      const msg = e instanceof Error ? e.message : "Error";
+      // If we already have (partial) data on screen, a failed request just means
+      // one heavy day didn't finish this attempt. Show a soft notice, not a red
+      // error, and keep retrying -- heavy days get faster on retry because each
+      // conversation's parts fetch is cached server-side for 5 min.
+      const haveData = Boolean(dataRef.current);
+      if (haveData) {
+        setNotice(
+          `A heavy day is still computing (it speeds up on retry). ` +
+          (autoRef.current ? "Continuing automatically..." : "Click Reload to retry.")
+        );
+        setError(null);
+      } else {
+        setError(msg);
+      }
+      // Auto-retry with a higher cap (heavy days may need several warm-up passes).
+      if (autoRef.current && errorRetries.current < 30) {
         errorRetries.current += 1;
         setTimeout(() => {
           if (activeRange.current.start === s && activeRange.current.end === e) {
             load(start, end);
           }
-        }, 3000);
+        }, 4000);
+      } else if (autoRef.current) {
+        // Gave up auto-retrying -- leave a clear manual path.
+        setNotice(
+          `Stopped after several attempts. Some heavy days may need a manual Reload. ` +
+          `Current total reflects the days computed so far.`
+        );
       }
     }
     finally { setLoading(false); }
