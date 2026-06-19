@@ -188,7 +188,7 @@ export default function TradingEthicsTab() {
       } else {
         errorRetries.current = 0; // making progress, not erroring
         setNotice(
-          `Building this range: ${json.daysReady ?? 0} of ${json.daysTotal ?? "?"} days ready` +
+          `Building this range: ${json.ready ?? 0} of ${json.total ?? "?"} conversations attributed` +
           (autoRef.current
             ? " -- continuing automatically..."
             : " -- click Reload to compute more.")
