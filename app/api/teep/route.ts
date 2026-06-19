@@ -492,21 +492,31 @@ async function getTeepByConvs(
   uAfter: number, uBefore: number,
 ): Promise<{ result: any; complete: boolean }> {
   const started   = Date.now();
-  const BUDGET_MS = 45000;                 // return before the 60s cap
+  const BUDGET_MS = 38000;                 // keep each request well under the 60s cap
   const key       = periodKey(uAfter, uBefore);
 
-  // 1. Base (search + Pass 1/2): reuse cached, else compute once and cache.
-  let base = (await readTeepBase(key)) as BaseState | null;
-  if (!base) {
-    base = await computeBase(uAfter, uBefore);
-    await writeTeepBase(key, base);
+  // 1. Base (search + Pass 1/2). If it isn't cached yet, the search alone can be
+  //    slow, so persist the base and return IMMEDIATELY on this request. We do
+  //    not also fetch parts here -- that is what was pushing a cold heavy range
+  //    past the 60s gateway. The auto-reload then fills parts on later requests
+  //    (which skip the search entirely because the base is now cached).
+  const cachedBase = (await readTeepBase(key)) as BaseState | null;
+  if (!cachedBase) {
+    const fresh = await computeBase(uAfter, uBefore);
+    await writeTeepBase(key, fresh);
+    const result = finalize(fresh.agents, uAfter, uBefore);
+    const total  = fresh.needsParts.length;
+    result.partial = total > 0;
+    result.ready   = 0;
+    result.total   = total;
+    return { result, complete: total === 0 };
   }
 
-  // 2. Pass 3 from the per-conversation parts cache, within the time budget.
+  // 2. Base is cached -> spend this request's whole budget on parts only.
   const teepAdmins     = await getTeepAdmins();
   const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
   const { agents, complete, ready, total } = await applyParts(
-    base, uAfter, uBefore, teepAdminIdSet,
+    cachedBase, uAfter, uBefore, teepAdminIdSet,
     { useCache: true, budgetMs: BUDGET_MS, startedAt: started },
   );
 
