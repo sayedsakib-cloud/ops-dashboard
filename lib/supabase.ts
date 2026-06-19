@@ -58,3 +58,45 @@ export async function writeTeepCache(periodKey: string, result: unknown): Promis
 export function supabaseConfigured(): boolean {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
+
+// ── Day-bucket cache (teep_day table) ─────────────────────────────────────
+// Stores the RAW per-agent accumulators for a single calendar day, so any range
+// can be assembled by summing days (no double-counting, no truncation).
+const DAY_TABLE = "teep_day";
+
+// Read multiple day buckets at once. Returns a map of day -> raw accumulator
+// payload. Missing days simply won't be in the map. Errors -> empty map.
+export async function readTeepDays(days: string[]): Promise<Record<string, unknown>> {
+  const client = getClient();
+  if (!client || days.length === 0) return {};
+  try {
+    const { data, error } = await client
+      .from(DAY_TABLE)
+      .select("day, payload")
+      .in("day", days);
+    if (error || !data) return {};
+    const out: Record<string, unknown> = {};
+    for (const row of data as Array<{ day: string; payload: unknown }>) {
+      out[row.day] = row.payload;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// Upsert a single day's raw accumulator payload (rewrites that day's row).
+export async function writeTeepDay(day: string, payload: unknown): Promise<void> {
+  const client = getClient();
+  if (!client) return;
+  try {
+    await client
+      .from(DAY_TABLE)
+      .upsert(
+        { day, payload, computed_at: new Date().toISOString() },
+        { onConflict: "day" }
+      );
+  } catch {
+    // Non-fatal.
+  }
+}
