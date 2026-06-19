@@ -1,102 +1,102 @@
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-// Server-only Supabase client. Uses the service_role key, so this module must
-// NEVER be imported into client components. The service_role key bypasses RLS
-// and must stay on the server.
+// Server-only client (service role). Returns null when env is missing, so every
+// helper degrades gracefully and the route falls back to a live compute.
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-let _client: SupabaseClient | null = null;
-
-function getClient(): SupabaseClient | null {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return null; // not configured -> callers fall back to live compute
-  if (_client) return _client;
-  _client = createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+let _client: SupabaseClient | null | undefined;
+function client(): SupabaseClient | null {
+  if (_client !== undefined) return _client;
+  _client = (SUPABASE_URL && SUPABASE_KEY)
+    ? createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: false } })
+    : null;
   return _client;
 }
 
-const TABLE = "teep_cache";
-
-// Read a cached TEEP result by its period key. Returns null on miss or any error
-// (so the route can fall back to a live compute rather than failing).
-export async function readTeepCache(periodKey: string): Promise<unknown | null> {
-  const client = getClient();
-  if (!client) return null;
+// ── teep_cache: finished results per period_key ────────────────────────────
+export async function readTeepCache(key: string): Promise<any | null> {
+  const c = client(); if (!c) return null;
   try {
-    const { data, error } = await client
-      .from(TABLE)
-      .select("result")
-      .eq("period_key", periodKey)
-      .maybeSingle();
+    const { data, error } = await c
+      .from("teep_cache").select("result").eq("period_key", key).maybeSingle();
     if (error || !data) return null;
-    return (data as { result: unknown }).result;
-  } catch {
-    return null;
-  }
+    return data.result ?? null;
+  } catch { return null; }
 }
-
-// Upsert (insert or overwrite) a computed TEEP result for a period key.
-// Rewrites the single row for that period -- never appends duplicates.
-export async function writeTeepCache(periodKey: string, result: unknown): Promise<void> {
-  const client = getClient();
-  if (!client) return;
+export async function writeTeepCache(key: string, result: any): Promise<void> {
+  const c = client(); if (!c) return;
   try {
-    await client
-      .from(TABLE)
-      .upsert(
-        { period_key: periodKey, result, computed_at: new Date().toISOString() },
-        { onConflict: "period_key" }
-      );
-  } catch {
-    // Non-fatal: if the write fails, the result was still returned to the user.
-  }
+    await c.from("teep_cache").upsert({
+      period_key: key, result, computed_at: new Date().toISOString(),
+    });
+  } catch { /* ignore */ }
 }
 
-// True when Supabase env is present (used to decide whether caching is active).
-export function supabaseConfigured(): boolean {
-  return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-}
-
-// ── Day-bucket cache (teep_day table) ─────────────────────────────────────
-// Stores the RAW per-agent accumulators for a single calendar day, so any range
-// can be assembled by summing days (no double-counting, no truncation).
-const DAY_TABLE = "teep_day";
-
-// Read multiple day buckets at once. Returns a map of day -> raw accumulator
-// payload. Missing days simply won't be in the map. Errors -> empty map.
-export async function readTeepDays(days: string[]): Promise<Record<string, unknown>> {
-  const client = getClient();
-  if (!client || days.length === 0) return {};
+// ── teep_base: in-progress base (search + Pass 1/2) per period_key ─────────
+export async function readTeepBase(key: string): Promise<any | null> {
+  const c = client(); if (!c) return null;
   try {
-    const { data, error } = await client
-      .from(DAY_TABLE)
-      .select("day, payload")
-      .in("day", days);
-    if (error || !data) return {};
-    const out: Record<string, unknown> = {};
-    for (const row of data as Array<{ day: string; payload: unknown }>) {
-      out[row.day] = row.payload;
+    const { data, error } = await c
+      .from("teep_base").select("base").eq("period_key", key).maybeSingle();
+    if (error || !data) return null;
+    return data.base ?? null;
+  } catch { return null; }
+}
+export async function writeTeepBase(key: string, base: any): Promise<void> {
+  const c = client(); if (!c) return;
+  try {
+    await c.from("teep_base").upsert({
+      period_key: key, base, created_at: new Date().toISOString(),
+    });
+  } catch { /* ignore */ }
+}
+
+// ── teep_conv: per-conversation close events (immutable once closed) ───────
+export async function readTeepConvs(
+  ids: string[],
+): Promise<Record<string, Array<{ adminId: string; closedAt: number }>>> {
+  const c = client(); if (!c || ids.length === 0) return {};
+  const out: Record<string, Array<{ adminId: string; closedAt: number }>> = {};
+  try {
+    const CHUNK = 300; // keep each .in() filter well under URL/row limits
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const { data, error } = await c
+        .from("teep_conv").select("conv_id, closes").in("conv_id", slice);
+      if (error || !data) continue;
+      for (const row of data) out[row.conv_id] = row.closes ?? [];
     }
-    return out;
-  } catch {
-    return {};
-  }
+  } catch { /* ignore */ }
+  return out;
+}
+export async function writeTeepConvs(
+  records: Array<{ convId: string; closes: any }>,
+): Promise<void> {
+  const c = client(); if (!c || records.length === 0) return;
+  try {
+    const now = new Date().toISOString();
+    const rows = records.map(r => ({ conv_id: r.convId, closes: r.closes, cached_at: now }));
+    await c.from("teep_conv").upsert(rows);
+  } catch { /* ignore */ }
 }
 
-// Upsert a single day's raw accumulator payload (rewrites that day's row).
-export async function writeTeepDay(day: string, payload: unknown): Promise<void> {
-  const client = getClient();
-  if (!client) return;
+// ── teep_day: LEGACY (no longer used by the route). Kept for compatibility. ─
+export async function readTeepDays(days: string[]): Promise<Record<string, any>> {
+  const c = client(); if (!c || days.length === 0) return {};
+  const out: Record<string, any> = {};
   try {
-    await client
-      .from(DAY_TABLE)
-      .upsert(
-        { day, payload, computed_at: new Date().toISOString() },
-        { onConflict: "day" }
-      );
-  } catch {
-    // Non-fatal.
-  }
+    const { data, error } = await c
+      .from("teep_day").select("day, payload").in("day", days);
+    if (!error && data) for (const row of data) out[row.day] = row.payload;
+  } catch { /* ignore */ }
+  return out;
+}
+export async function writeTeepDay(day: string, payload: any): Promise<void> {
+  const c = client(); if (!c) return;
+  try {
+    await c.from("teep_day").upsert({
+      day, payload, computed_at: new Date().toISOString(),
+    });
+  } catch { /* ignore */ }
 }
