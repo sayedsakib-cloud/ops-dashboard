@@ -2,10 +2,16 @@ import { NextResponse }    from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions }      from "@/lib/auth";
 import { unstable_cache }   from "next/cache";
-import { readTeepCache, writeTeepCache } from "@/lib/supabase";
+import { readTeepCache, writeTeepCache, readTeepDays, writeTeepDay } from "@/lib/supabase";
 
 const INTERCOM_API  = "https://api.intercom.io";
 const SLA_SECS      = 24 * 3600;
+
+// Large uncached computes page through many Intercom results. Give the function
+// the Hobby-plan maximum (60s). Day buckets keep individual computes small, so
+// this is ample; only a cold multi-day range computes several days in one call.
+export const maxDuration = 60;
+export const dynamic = "force-dynamic";
 
 const TEEP_AGENT_NAMES = [
   "john ferguson", "camellia warren", "anna linhart",
@@ -120,7 +126,10 @@ async function fetchConvsAllTeams(
     "Intercom-Version": "2.11",
   };
   const BATCH_SIZE = 5;  // teams per OR clause -- safe below Intercom query depth limit
-  const PAGE_CAP   = 5;  // 5 pages x 150 = 750 convs per batch; ample for 7-day window
+  // Real stop condition is cursor === null. PAGE_CAP is only a runaway safety
+  // bound -- high enough to never truncate a real day/range. With day buckets,
+  // a single day rarely exceeds a couple pages, but keep headroom for busy days.
+  const PAGE_CAP   = 1000;
 
   // Split team IDs into groups of 5
   const batches: string[][] = [];
@@ -210,15 +219,27 @@ async function fetchCloseParts(
   return events;
 }
 
-// ── Full TEEP computation (the expensive Intercom work) ───────────────────
-// This is the slow path: two OR-batched conversation searches + per-conversation
-// parts fetches. We only ever run it on a cache MISS. Because we only view
-// CLOSED periods (never today), a computed result is final and is stored in
-// Supabase forever -- so this runs at most once per period, ever.
-async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
-    const token       = process.env.INTERCOM_ACCESS_TOKEN!;
-    const periodDays  = Math.max(1, Math.round((uBefore - uAfter) / 86400));
-    const workingDays = countWorkdays(uAfter, uBefore);
+// ── Raw per-agent accumulator type (the additive building block) ──────────
+type RawAcc = {
+  name: string;
+  assigned: number; repliedTo: number; closed: number;
+  frtSum: number; frtN: number; handlingSum: number; handlingN: number;
+  atfSum: number; atfN: number; slaMet: number; slaTotal: number;
+};
+// Raw payload for a day/range: agentId -> RawAcc. Fully additive across days.
+type RawPayload = Record<string, RawAcc>;
+
+function emptyRaw(name: string): RawAcc {
+  return { name, assigned:0, repliedTo:0, closed:0,
+           frtSum:0, frtN:0, handlingSum:0, handlingN:0,
+           atfSum:0, atfN:0, slaMet:0, slaTotal:0 };
+}
+
+// ── RAW accumulation for a single window (the expensive Intercom work) ─────
+// Returns per-agent additive accumulators (sums + counts), NOT finalized
+// averages. Used both for single-day buckets and (via wrapper) full ranges.
+async function computeRaw(uAfter: number, uBefore: number): Promise<RawPayload> {
+    const token = process.env.INTERCOM_ACCESS_TOKEN!;
 
     const [crTeams, { admins }] = await Promise.all([getCRTeams(), getAdmins()]);
     if (!crTeams.length) throw new Error("No CR teams found");
@@ -233,31 +254,17 @@ async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
     const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
     const teamIds        = crTeams.map(t => t.id);
 
-    // Two OR-batched searches run in parallel (replaces 28 per-team calls)
     const [activityConvs, closedOnlyRaw] = await Promise.all([
       fetchConvsAllTeams(token, teamIds, "updated_at",               uAfter, uBefore),
       fetchConvsAllTeams(token, teamIds, "statistics.last_close_at", uAfter, uBefore),
     ]);
 
-    // Separate activity set from closed-only extras
-    const activityIds    = new Set(activityConvs.map((c: any) => c.id));
+    const activityIds     = new Set(activityConvs.map((c: any) => c.id));
     const closedOnlyConvs = closedOnlyRaw.filter((c: any) => !activityIds.has(c.id));
 
-    // Per-agent accumulator
-    type Acc = {
-      name: string;
-      assigned: number; repliedTo: number; closed: number;
-      frtSum: number; frtN: number; handlingSum: number; handlingN: number;
-      atfSum: number; atfN: number; slaMet: number; slaTotal: number;
-    };
-    function emptyAcc(name: string): Acc {
-      return { name, assigned:0, repliedTo:0, closed:0,
-               frtSum:0, frtN:0, handlingSum:0, handlingN:0,
-               atfSum:0, atfN:0, slaMet:0, slaTotal:0 };
-    }
-    const agentMap = new Map<string, Acc>();
+    const agentMap = new Map<string, RawAcc>();
     teepAdmins.forEach((a: any) =>
-      agentMap.set(String(a.id), emptyAcc(decodeName(a.name ?? String(a.id))))
+      agentMap.set(String(a.id), emptyRaw(decodeName(a.name ?? String(a.id))))
     );
 
     const closeCounted = new Set<string>();
@@ -345,74 +352,110 @@ async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
       }
     }
 
-    // Build rows
-    type AgentRow = {
-      name: string; assigned: number; repliedTo: number; closed: number;
-      avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
-      repliedPerHour: string; closedPerHour: string;
-      slaMet: number; slaTotal: number; slaRate: number;
-    };
-    const rows: AgentRow[] = [...agentMap.values()]
-      .filter(a => a.assigned > 0 || a.repliedTo > 0 || a.closed > 0)
-      .map(a => ({
-        name:           a.name,
-        assigned:       a.assigned,
-        repliedTo:      a.repliedTo,
-        closed:         a.closed,
-        avgFrtFmt:      a.frtN > 0      ? fmt(a.frtSum / a.frtN)           : "--",
-        avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
-        avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
-        repliedPerHour: workingDays > 0  ? (a.repliedTo / workingDays).toFixed(1) : "--",
-        closedPerHour:  workingDays > 0  ? (a.closed    / workingDays).toFixed(1) : "--",
-        slaMet:         a.slaMet,
-        slaTotal:       a.slaTotal,
-        slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
-      }))
-      .sort((a, b) => b.closed - a.closed);
+    // Return raw accumulators keyed by agent id (serializable, additive)
+    const payload: RawPayload = {};
+    for (const [id, acc] of agentMap.entries()) payload[id] = acc;
+    return payload;
+}
 
-    // Summary
-    const totalAssigned  = rows.reduce((s, r) => s + r.assigned,  0);
-    const totalRepliedTo = rows.reduce((s, r) => s + r.repliedTo, 0);
-    const totalClosed    = rows.reduce((s, r) => s + r.closed,    0);
-    const totalSlaMet    = rows.reduce((s, r) => s + r.slaMet,    0);
-    const totalSlaTotal  = rows.reduce((s, r) => s + r.slaTotal,  0);
-
-    let wFrtSum = 0, wFrtN = 0, wHandlingSum = 0, wHandlingN = 0, wAtfSum = 0, wAtfN = 0;
-    for (const a of agentMap.values()) {
-      wFrtSum += a.frtSum; wFrtN += a.frtN;
-      wHandlingSum += a.handlingSum; wHandlingN += a.handlingN;
-      wAtfSum += a.atfSum; wAtfN += a.atfN;
+// ── Merge raw payloads (component-wise add) -- the heart of additivity ─────
+function mergeRaw(payloads: RawPayload[]): RawPayload {
+  const out: RawPayload = {};
+  for (const p of payloads) {
+    for (const [id, acc] of Object.entries(p)) {
+      if (!out[id]) out[id] = emptyRaw(acc.name);
+      const o = out[id];
+      o.assigned += acc.assigned; o.repliedTo += acc.repliedTo; o.closed += acc.closed;
+      o.frtSum += acc.frtSum; o.frtN += acc.frtN;
+      o.handlingSum += acc.handlingSum; o.handlingN += acc.handlingN;
+      o.atfSum += acc.atfSum; o.atfN += acc.atfN;
+      o.slaMet += acc.slaMet; o.slaTotal += acc.slaTotal;
+      if (!o.name && acc.name) o.name = acc.name;
     }
+  }
+  return out;
+}
 
-    const summaryRow: AgentRow = {
-      name:           "Summary",
-      assigned:       totalAssigned,
-      repliedTo:      totalRepliedTo,
-      closed:         totalClosed,
-      avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
+// ── Finalize raw accumulators into the API result shape ───────────────────
+function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
+  const periodDays  = Math.max(1, Math.round((uBefore - uAfter) / 86400));
+  const workingDays = countWorkdays(uAfter, uBefore);
+
+  type AgentRow = {
+    name: string; assigned: number; repliedTo: number; closed: number;
+    avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
+    repliedPerHour: string; closedPerHour: string;
+    slaMet: number; slaTotal: number; slaRate: number;
+  };
+
+  const accs = Object.values(raw);
+  const rows: AgentRow[] = accs
+    .filter(a => a.assigned > 0 || a.repliedTo > 0 || a.closed > 0)
+    .map(a => ({
+      name:           a.name,
+      assigned:       a.assigned,
+      repliedTo:      a.repliedTo,
+      closed:         a.closed,
+      avgFrtFmt:      a.frtN > 0       ? fmt(a.frtSum / a.frtN)           : "--",
+      avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
+      avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
+      repliedPerHour: workingDays > 0  ? (a.repliedTo / workingDays).toFixed(1) : "--",
+      closedPerHour:  workingDays > 0  ? (a.closed    / workingDays).toFixed(1) : "--",
+      slaMet:         a.slaMet,
+      slaTotal:       a.slaTotal,
+      slaRate:        a.slaTotal > 0 ? +((a.slaMet / a.slaTotal) * 100).toFixed(1) : 0,
+    }))
+    .sort((a, b) => b.closed - a.closed);
+
+  const totalAssigned  = rows.reduce((s, r) => s + r.assigned,  0);
+  const totalRepliedTo = rows.reduce((s, r) => s + r.repliedTo, 0);
+  const totalClosed    = rows.reduce((s, r) => s + r.closed,    0);
+  const totalSlaMet    = rows.reduce((s, r) => s + r.slaMet,    0);
+  const totalSlaTotal  = rows.reduce((s, r) => s + r.slaTotal,  0);
+
+  let wFrtSum = 0, wFrtN = 0, wHandlingSum = 0, wHandlingN = 0, wAtfSum = 0, wAtfN = 0;
+  for (const a of accs) {
+    wFrtSum += a.frtSum; wFrtN += a.frtN;
+    wHandlingSum += a.handlingSum; wHandlingN += a.handlingN;
+    wAtfSum += a.atfSum; wAtfN += a.atfN;
+  }
+
+  const summaryRow: AgentRow = {
+    name:           "Summary",
+    assigned:       totalAssigned,
+    repliedTo:      totalRepliedTo,
+    closed:         totalClosed,
+    avgFrtFmt:      wFrtN > 0       ? fmt(wFrtSum / wFrtN)           : "--",
+    avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
+    avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
+    repliedPerHour: workingDays > 0 ? (totalRepliedTo / workingDays).toFixed(1) : "--",
+    closedPerHour:  workingDays > 0 ? (totalClosed    / workingDays).toFixed(1) : "--",
+    slaMet:         totalSlaMet,
+    slaTotal:       totalSlaTotal,
+    slaRate:        totalSlaTotal > 0 ? +((totalSlaMet / totalSlaTotal) * 100).toFixed(1) : 0,
+  };
+
+  return {
+    summary: {
+      totalClosed,
+      avgFrtFmt:      wFrtN > 0       ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
-      avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
-      repliedPerHour: workingDays > 0 ? (totalRepliedTo / workingDays).toFixed(1) : "--",
-      closedPerHour:  workingDays > 0 ? (totalClosed    / workingDays).toFixed(1) : "--",
-      slaMet:         totalSlaMet,
-      slaTotal:       totalSlaTotal,
-      slaRate:        totalSlaTotal > 0 ? +((totalSlaMet / totalSlaTotal) * 100).toFixed(1) : 0,
-    };
+      slaRate:        summaryRow.slaRate,
+      slaMetCount:    totalSlaMet,
+      slaTotalCount:  totalSlaTotal,
+      top3:           rows.slice(0, 3).map(r => ({ name: r.name, closed: r.closed })),
+    },
+    periodDays,
+    summaryRow,
+    agents: rows,
+  };
+}
 
-    return {
-      summary: {
-        totalClosed,
-        avgFrtFmt:      wFrtN > 0      ? fmt(wFrtSum / wFrtN)           : "--",
-        avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
-        slaRate:        summaryRow.slaRate,
-        slaMetCount:    totalSlaMet,
-        slaTotalCount:  totalSlaTotal,
-        top3:           rows.slice(0, 3).map(r => ({ name: r.name, closed: r.closed })),
-      },
-      periodDays,
-      summaryRow,
-      agents: rows,
-    };
+// ── Full-range compute (legacy path): raw over the whole window, then finalize.
+// Used as the period-key cache fill and the Supabase-down fallback.
+async function computeTeep(uAfter: number, uBefore: number): Promise<any> {
+  const raw = await computeRaw(uAfter, uBefore);
+  return finalize(raw, uAfter, uBefore);
 }
 
 // ── Period key: stable identifier for a closed date range ─────────────────
@@ -424,25 +467,111 @@ function periodKey(uAfter: number, uBefore: number): string {
   return `${a}_${b}`;
 }
 
+// ── Day helpers for the bucket model ──────────────────────────────────────
+// List the +06 (Dhaka) calendar day strings covered by [uAfter, uBefore].
+function listDays(uAfter: number, uBefore: number): string[] {
+  const days: string[] = [];
+  // Convert bounds to Dhaka day strings.
+  const startMs = uAfter * 1000;
+  const endMs   = uBefore * 1000;
+  const d = new Date(startMs + 6 * 3600 * 1000);
+  let cur = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const endD = new Date(endMs + 6 * 3600 * 1000);
+  const endDay = Date.UTC(endD.getUTCFullYear(), endD.getUTCMonth(), endD.getUTCDate());
+  while (cur <= endDay) {
+    days.push(new Date(cur).toISOString().slice(0, 10));
+    cur += 86400 * 1000;
+  }
+  return days;
+}
+
+// Compute one day's raw accumulator and cache it. day = "YYYY-MM-DD" (Dhaka).
+async function computeAndCacheDay(day: string): Promise<RawPayload> {
+  const uAfter  = toUnixStart(day);
+  const uBefore = toUnixEnd(day);
+  const raw = await computeRaw(uAfter, uBefore);
+  await writeTeepDay(day, raw);
+  return raw;
+}
+
+// Assemble a range from per-day buckets. Reads cached days, computes missing
+// ones (bounded so a cold large range doesn't exceed the function timeout),
+// merges, finalizes. Returns { result, complete } -- complete=false means some
+// days couldn't be computed in this request and will fill in on a later load.
+async function getTeepByDays(
+  uAfter: number, uBefore: number,
+): Promise<{ result: any; complete: boolean }> {
+  const days = listDays(uAfter, uBefore);
+  const cachedMap = await readTeepDays(days);
+
+  const missing = days.filter(d => !cachedMap[d]);
+  const payloads: RawPayload[] = [];
+
+  // Use cached days
+  for (const d of days) {
+    if (cachedMap[d]) payloads.push(cachedMap[d] as RawPayload);
+  }
+
+  // Compute missing days, but bound how many we do in one request so we stay
+  // under the 60s function limit. Each day is a few seconds; cap at 8 per call.
+  // Remaining missing days fill in on subsequent loads / nightly cron.
+  const MAX_DAYS_PER_REQUEST = 8;
+  let computedCount = 0;
+  let complete = missing.length === 0;
+
+  for (const d of missing) {
+    if (computedCount >= MAX_DAYS_PER_REQUEST) { complete = false; break; }
+    try {
+      const raw = await computeAndCacheDay(d);
+      payloads.push(raw);
+      computedCount++;
+    } catch {
+      complete = false;
+    }
+  }
+
+  const merged = mergeRaw(payloads);
+  const result = finalize(merged, uAfter, uBefore);
+  result.partial = !complete; // surfaced so UI can show "still computing" if desired
+  return { result, complete };
+}
+
 // ── Cache-first wrapper ───────────────────────────────────────────────────
-// 1. Try Supabase (instant). 2. On miss, compute once (slow). 3. Write back.
-// If Supabase is unreachable/unconfigured, fall back to a live compute so the
-// tab still works -- just without the speed-up.
+// Strategy:
+//   1. Try the exact period-key cache (fastest for repeated identical queries).
+//   2. Otherwise assemble from per-day buckets (additive, never truncates).
+//   3. If a range is fully assembled from days, also store it under its
+//      period-key so the next identical query is a one-read hit.
+//   4. If Supabase is unconfigured/unreachable, fall back to a live full compute.
 // Exported so the cron warmer can call it directly (no HTTP / no auth needed).
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
   const key = periodKey(uAfter, uBefore);
 
-  // 1. Read-through cache
+  // 1. Exact period-key cache (only trust it for COMPLETE results)
   const cached = await readTeepCache(key);
   if (cached) return cached;
 
-  // 2. Miss -> compute (the slow path, at most once per period)
-  const fresh = await computeTeep(uAfter, uBefore);
+  // 2. Assemble from day buckets
+  try {
+    const { result, complete } = await getTeepByDays(uAfter, uBefore);
+    // 3. Cache complete ranges under the period key for instant repeat hits
+    if (complete) await writeTeepCache(key, result);
+    return result;
+  } catch {
+    // 4. Fallback: live full-range compute (Supabase down or day path failed)
+    const fresh = await computeTeep(uAfter, uBefore);
+    await writeTeepCache(key, fresh);
+    return fresh;
+  }
+}
 
-  // 3. Write back (non-blocking failure is fine)
-  await writeTeepCache(key, fresh);
-
-  return fresh;
+// ── Cron helper: compute & cache yesterday's single day bucket ────────────
+export async function warmYesterdayDay(): Promise<void> {
+  const dhakaNow = new Date(Date.now() + 6 * 3600 * 1000);
+  const y = new Date(Date.UTC(
+    dhakaNow.getUTCFullYear(), dhakaNow.getUTCMonth(), dhakaNow.getUTCDate() - 1
+  )).toISOString().slice(0, 10);
+  await computeAndCacheDay(y);
 }
 
 // ── Default precompute windows (used by the cron warmer) ──────────────────
