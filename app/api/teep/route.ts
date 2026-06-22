@@ -926,6 +926,89 @@ export async function GET(req: Request) {
       });
     }
 
+    // ?diag=8&date=YYYY-MM-DD -> RAW PARTS inspector. For the day's reply-bearing
+    // conversations: how many have truncated parts (total_count > returned), how
+    // many contribute zero in-window human comment, and a few raw samples of the
+    // zero-reply ones so we can see exactly what their parts look like.
+    if (diag === "8") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
+      const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
+      const token   = process.env.INTERCOM_ACCESS_TOKEN!;
+      const started = Date.now();
+      const crTeams = await getCRTeams();
+      const { nameMap } = await getAdmins();
+
+      const convs = await fetchConvsAllTeams(
+        token, crTeams.map((t: any) => t.id), "statistics.last_admin_reply_at", uA, uB,
+      );
+
+      let truncatedConvs = 0, zeroInWindowComment = 0, botLastReply = 0, processed = 0;
+      const partTypeTally: Record<string, number> = {};
+      const samples: any[] = [];
+
+      for (let i = 0; i < convs.length; i += 20) {
+        if (Date.now() - started > 42000) break;
+        const slice = convs.slice(i, i + 20);
+        const detailed = await Promise.all(slice.map(async (c: any) => {
+          const r = await fetch(`${INTERCOM_API}/conversations/${c.id}`, {
+            headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
+            next: { revalidate: 300 },
+          });
+          return r.ok ? r.json() : null;
+        }));
+        for (const d of detailed) {
+          if (!d) continue;
+          processed++;
+          const wrap   = d.conversation_parts ?? {};
+          const parts  = wrap.conversation_parts ?? [];
+          const total  = wrap.total_count ?? parts.length;
+          if (total > parts.length) truncatedConvs++;
+
+          const inWinAdminComment = parts.filter((p: any) =>
+            p.part_type === "comment" && p.author?.type === "admin"
+            && p.created_at > uA && p.created_at < uB);
+          if (inWinAdminComment.length === 0) zeroInWindowComment++;
+
+          const last = parts[parts.length - 1];
+          if (last?.author?.type && last.author.type !== "admin") botLastReply++;
+
+          for (const p of parts) partTypeTally[`${p.part_type}/${p.author?.type}`] =
+            (partTypeTally[`${p.part_type}/${p.author?.type}`] ?? 0) + 1;
+
+          if (samples.length < 3 && inWinAdminComment.length === 0) {
+            samples.push({
+              convId: d.id,
+              partsTotalCount: total,
+              partsReturned: parts.length,
+              truncated: total > parts.length,
+              lastAdminReplyAt: d.statistics?.last_admin_reply_at,
+              parts: parts.slice(-12).map((p: any) => ({
+                part_type:  p.part_type,
+                authorType: p.author?.type,
+                authorName: p.author?.id ? (nameMap[String(p.author.id)] ?? p.author?.name ?? `id ${p.author.id}`) : null,
+                created_at: p.created_at,
+                inWindow:   p.created_at > uA && p.created_at < uB,
+              })),
+            });
+          }
+        }
+      }
+
+      return NextResponse.json({
+        date: dateStr,
+        convsFound: convs.length,
+        convsProcessed: processed,
+        truncatedConvs,                 // parts truncation present? (close + reply loss)
+        zeroInWindowComment,            // convs the reply probe scored as 0
+        botOrNonAdminLastPart: botLastReply,
+        partTypeBreakdown: partTypeTally,
+        zeroReplySamples: samples,      // raw look at the convs scoring 0
+        at: new Date().toISOString(),
+      });
+    }
+
     const startDate = searchParams.get("startDate") ?? "";
     const endDate   = searchParams.get("endDate")   ?? "";
 
