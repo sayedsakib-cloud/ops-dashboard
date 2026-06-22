@@ -717,6 +717,93 @@ export async function GET(req: Request) {
       return NextResponse.json(await measureDay(dateStr));
     }
 
+    // Shared: count conversations matching a search, via total_count (instant, no pagination).
+    const countConvs = async (
+      field: string, uA: number, uB: number, emailOnly: boolean,
+    ): Promise<number> => {
+      const token   = process.env.INTERCOM_ACCESS_TOKEN!;
+      const crTeams = await getCRTeams();
+      const teamIds = crTeams.map(t => t.id);
+      const HDRS = { Authorization: `Bearer ${token}`, "Content-Type": "application/json", "Intercom-Version": "2.11" };
+      const teamBatches: string[][] = [];
+      for (let i = 0; i < teamIds.length; i += 5) teamBatches.push(teamIds.slice(i, i + 5));
+      const perBatch = await Promise.all(teamBatches.map(async (bTeams) => {
+        const value: any[] = [];
+        if (emailOnly) value.push({ field: "source.type", operator: "=", value: "email" });
+        value.push({ operator: "OR", value: bTeams.map(id => ({ field: "team_assignee_id", operator: "=", value: parseInt(id) })) });
+        value.push({ field, operator: ">", value: uA });
+        value.push({ field, operator: "<", value: uB });
+        const res = await fetch(`${INTERCOM_API}/conversations/search`, {
+          method: "POST", headers: HDRS, body: JSON.stringify({ query: { operator: "AND", value }, pagination: { per_page: 1 } }),
+        });
+        const data = await res.json();
+        return data.total_count ?? 0;
+      }));
+      return perBatch.reduce((s, n) => s + n, 0);
+    };
+
+    // ?diag=3&date=YYYY-MM-DD -> raw VOLUME for a day (instant; safe even for heavy days).
+    if (diag === "3") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
+      const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
+      const [updEmail, closeEmail, closeAll] = await Promise.all([
+        countConvs("updated_at", uA, uB, true),
+        countConvs("statistics.last_close_at", uA, uB, true),
+        countConvs("statistics.last_close_at", uA, uB, false),
+      ]);
+      return NextResponse.json({
+        date: dateStr,
+        updated_at_count_email: updEmail,         // activity volume (the search that times out when huge)
+        last_close_at_count_email: closeEmail,    // closed-search volume, EMAIL only (TEEP's scope)
+        last_close_at_count_allChannels: closeAll,// closed-search volume, ALL channels in CR teams
+        note: "Compare last_close_at_count_email to your internal dashboard's number for this day.",
+        at: new Date().toISOString(),
+      });
+    }
+
+    // ?diag=4&date=YYYY-MM-DD -> full CLOSED-COUNT breakdown (safe on light days; may
+    // time out on a heavy day like 2026-06-16 -- use diag=3 for those).
+    if (diag === "4") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
+      const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
+
+      const [closeEmail, closeAll] = await Promise.all([
+        countConvs("statistics.last_close_at", uA, uB, true),
+        countConvs("statistics.last_close_at", uA, uB, false),
+      ]);
+
+      const base = await computeBase(uA, uB);
+      const attributedBeforeParts = Object.values(base.agents).reduce((s, a) => s + a.closed, 0);
+      const needsParts = base.needsParts.length;
+
+      const teepAdmins     = await getTeepAdmins();
+      const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
+      const { agents } = await applyParts(base, uA, uB, teepAdminIdSet, { useCache: false });
+      const finalClosed = Object.values(agents).reduce((s, a) => s + a.closed, 0);
+
+      return NextResponse.json({
+        date: dateStr,
+        searchFinds: {
+          last_close_at_email: closeEmail,        // convs TEEP's email+CR search finds closed this day
+          last_close_at_allChannels: closeAll,    // same, but all channels (scope check)
+        },
+        teepCredits: {
+          attributedBeforeParts,                  // closes credited to a TEEP agent before parts
+          needsPartsUnattributed: needsParts,     // closed convs with no obvious TEEP closer
+          finalClosed,                            // the number the dashboard shows
+        },
+        interpretation:
+          `Search found ${closeEmail} email closes in CR teams; TEEP credited ${finalClosed}. ` +
+          `Unexplained gap (found-but-not-credited) = ${closeEmail - finalClosed}. ` +
+          `All-channels closes = ${closeAll} (if this >> email, the internal number counts non-email).`,
+        at: new Date().toISOString(),
+      });
+    }
+
     const startDate = searchParams.get("startDate") ?? "";
     const endDate   = searchParams.get("endDate")   ?? "";
 
