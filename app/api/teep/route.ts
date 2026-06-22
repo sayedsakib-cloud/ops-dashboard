@@ -407,14 +407,14 @@ async function fetchAllCloseEvents(token: string, convId: string): Promise<Close
 // ── Per-agent accumulator ─────────────────────────────────────────────────
 type RawAcc = {
   name: string;
-  assigned: number; repliedTo: number; closed: number;
+  assigned: number; repliedTo: number; closed: number; repliesSent: number;
   frtSum: number; frtN: number; handlingSum: number; handlingN: number;
   atfSum: number; atfN: number; slaMet: number; slaTotal: number;
 };
 type RawPayload = Record<string, RawAcc>;
 
 function emptyRaw(name: string): RawAcc {
-  return { name, assigned:0, repliedTo:0, closed:0,
+  return { name, assigned:0, repliedTo:0, closed:0, repliesSent:0,
            frtSum:0, frtN:0, handlingSum:0, handlingN:0,
            atfSum:0, atfN:0, slaMet:0, slaTotal:0 };
 }
@@ -587,7 +587,7 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
   const workingDays = countWorkdays(uAfter, uBefore);
 
   type AgentRow = {
-    name: string; assigned: number; repliedTo: number; closed: number;
+    name: string; assigned: number; repliedTo: number; closed: number; repliesSent: number;
     avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
     repliedPerHour: string; closedPerHour: string;
     slaMet: number; slaTotal: number; slaRate: number;
@@ -595,12 +595,13 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
 
   const accs = Object.values(raw);
   const rows: AgentRow[] = accs
-    .filter(a => a.assigned > 0 || a.repliedTo > 0 || a.closed > 0)
+    .filter(a => a.assigned > 0 || a.repliedTo > 0 || a.closed > 0 || a.repliesSent > 0)
     .map(a => ({
       name:           a.name,
       assigned:       a.assigned,
       repliedTo:      a.repliedTo,
       closed:         a.closed,
+      repliesSent:    a.repliesSent,
       avgFrtFmt:      a.frtN > 0       ? fmt(a.frtSum / a.frtN)           : "--",
       avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
       avgAtfFmt:      a.atfN > 0       ? fmt(a.atfSum / a.atfN)           : "--",
@@ -615,6 +616,7 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
   const totalAssigned  = rows.reduce((s, r) => s + r.assigned,  0);
   const totalRepliedTo = rows.reduce((s, r) => s + r.repliedTo, 0);
   const totalClosed    = rows.reduce((s, r) => s + r.closed,    0);
+  const totalReplies   = rows.reduce((s, r) => s + r.repliesSent, 0);
   const totalSlaMet    = rows.reduce((s, r) => s + r.slaMet,    0);
   const totalSlaTotal  = rows.reduce((s, r) => s + r.slaTotal,  0);
 
@@ -630,6 +632,7 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
     assigned:       totalAssigned,
     repliedTo:      totalRepliedTo,
     closed:         totalClosed,
+    repliesSent:    totalReplies,
     avgFrtFmt:      wFrtN > 0       ? fmt(wFrtSum / wFrtN)           : "--",
     avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
     avgAtfFmt:      wAtfN > 0       ? fmt(wAtfSum / wAtfN)           : "--",
@@ -643,6 +646,7 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
   return {
     summary: {
       totalClosed,
+      totalRepliesSent: totalReplies,
       avgFrtFmt:      wFrtN > 0       ? fmt(wFrtSum / wFrtN)           : "--",
       avgHandlingFmt: wHandlingN > 0  ? fmt(wHandlingSum / wHandlingN) : "--",
       slaRate:        summaryRow.slaRate,
@@ -727,6 +731,7 @@ function mergeRaw(target: RawPayload, src: RawPayload): void {
     const t = target[id] ?? (target[id] = emptyRaw(a.name));
     if (!t.name && a.name) t.name = a.name;
     t.assigned    += a.assigned;    t.repliedTo += a.repliedTo;  t.closed += a.closed;
+    t.repliesSent += a.repliesSent;
     t.frtSum      += a.frtSum;      t.frtN      += a.frtN;
     t.handlingSum += a.handlingSum; t.handlingN += a.handlingN;
     t.atfSum      += a.atfSum;      t.atfN      += a.atfN;
@@ -746,16 +751,33 @@ async function computeDayRaw(
   const dayKey = periodKey(uA, uB);
 
   // Per-day base (small single-day search): reuse cached, else compute + cache.
+  // computeBase gives the time-based stats (assigned, FRT, SLA, handling, ATF,
+  // repliedTo). Its `closed` is overwritten below by the accurate engine.
   let base: BaseState | null = useCache ? ((await readTeepBase(dayKey)) as BaseState | null) : null;
   if (!base) {
     base = await computeBase(uA, uB);
     if (useCache) await writeTeepBase(dayKey, base);
   }
 
-  const { agents, complete } = await applyParts(
-    base, uA, uB, teepAdminIdSet, { useCache, budgetMs, startedAt },
-  );
-  if (complete && useCache) await writeTeepDay(day, agents); // freeze the finished day
+  // Accurate closed (all 12 agents, reopen-recovered) + replies, from the
+  // resumable parts engine. Drives completeness for the day.
+  const nameMap: Record<string, string> = {};
+  for (const [id, a] of Object.entries(base.agents)) nameMap[id] = a.name;
+  const acc = await accurateDay(uA, uB, teepAdminIdSet, nameMap, budgetMs, startedAt);
+
+  // Merge: keep base stats, OVERRIDE closed with accurate, ADD repliesSent.
+  const agents: RawPayload = {};
+  for (const [id, a] of Object.entries(base.agents)) {
+    agents[id] = { ...a, closed: 0, repliesSent: 0 };
+  }
+  for (const [id, pa] of Object.entries(acc.perAgent)) {
+    const row = (agents[id] ??= emptyRaw(pa.name));
+    row.closed      = pa.closed;
+    row.repliesSent = pa.replies;
+  }
+
+  const complete = acc.complete;
+  if (complete && useCache) await writeTeepDay("v2_" + day, agents); // freeze the finished day
   return { agents, complete };
 }
 
@@ -775,15 +797,16 @@ async function getTeepByDays(
   const teepAdmins     = await getTeepAdmins();
   const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
 
-  // 1. Pull every already-cached complete day in one batch (cheap).
+  // 1. Pull every already-cached complete day in one batch (cheap). v2 = new
+  //    accurate-closed + replies engine; old unversioned rows are ignored.
   const cached: Record<string, RawPayload> = useCache
-    ? (await readTeepDays(days)) as Record<string, RawPayload>
+    ? (await readTeepDays(days.map(d => "v2_" + d))) as Record<string, RawPayload>
     : {};
 
   const merged: RawPayload = {};
   const missing: string[] = [];
   for (const d of days) {
-    if (cached[d]) mergeRaw(merged, cached[d]);
+    if (cached["v2_" + d]) mergeRaw(merged, cached["v2_" + d]);
     else missing.push(d);
   }
 
@@ -822,7 +845,7 @@ function isUsableResult(r: any): boolean {
 // ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
   const haveSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const key = periodKey(uAfter, uBefore);
+  const key = "v2_" + periodKey(uAfter, uBefore);
 
   // 1. Finished range cached -> instant. Ignore empty/poisoned rows and recompute.
   if (haveSupabase) {
