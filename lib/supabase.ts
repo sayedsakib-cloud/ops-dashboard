@@ -14,6 +14,52 @@ function client(): SupabaseClient | null {
   return _client;
 }
 
+// ── Diagnostics ────────────────────────────────────────────────────────────
+// These do NOT swallow errors -- they report them, so we can see exactly why
+// the cache is (or isn't) working in production instead of failing silently.
+export function supabaseEnvPresent() {
+  return {
+    SUPABASE_URL: !!SUPABASE_URL,
+    SUPABASE_SERVICE_ROLE_KEY: !!SUPABASE_KEY,
+  };
+}
+
+// Probes each table for read + write access and returns the precise error.
+// A "__healthcheck__" probe row is written then deleted, so it leaves no trace.
+export async function supabaseHealthcheck() {
+  const c = client();
+  if (!c) return { connected: false, reason: "env-missing", tables: {} as Record<string, unknown> };
+
+  const probes: Array<{ name: string; pk: string; row: Record<string, unknown> }> = [
+    { name: "teep_cache", pk: "period_key",
+      row: { period_key: "__healthcheck__", result: { ok: true }, computed_at: new Date().toISOString() } },
+    { name: "teep_base", pk: "period_key",
+      row: { period_key: "__healthcheck__", base: { ok: true }, created_at: new Date().toISOString() } },
+    { name: "teep_conv", pk: "conv_id",
+      row: { conv_id: "__healthcheck__", closes: [], cached_at: new Date().toISOString() } },
+  ];
+
+  const tables: Record<string, { read: unknown; write: unknown }> = {};
+  for (const p of probes) {
+    const entry: { read: unknown; write: unknown } = { read: null, write: null };
+    try {
+      const { error, count } = await c.from(p.name).select("*", { count: "exact", head: true });
+      entry.read = error ? { ok: false, error: error.message } : { ok: true, rows: count ?? 0 };
+    } catch (e) {
+      entry.read = { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    try {
+      const { error } = await c.from(p.name).upsert(p.row);
+      entry.write = error ? { ok: false, error: error.message } : { ok: true };
+      if (!error) await c.from(p.name).delete().eq(p.pk, "__healthcheck__");
+    } catch (e) {
+      entry.write = { ok: false, error: e instanceof Error ? e.message : String(e) };
+    }
+    tables[p.name] = entry;
+  }
+  return { connected: true, tables };
+}
+
 // ── teep_cache: finished results per period_key ────────────────────────────
 export async function readTeepCache(key: string): Promise<any | null> {
   const c = client(); if (!c) return null;
