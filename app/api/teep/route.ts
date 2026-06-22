@@ -6,6 +6,7 @@ import {
   readTeepCache, writeTeepCache,
   readTeepBase,  writeTeepBase,
   readTeepConvs, writeTeepConvs,
+  readTeepParts, writeTeepParts, type ConvParts,
   readTeepDays,  writeTeepDay,
   supabaseEnvPresent, supabaseHealthcheck, supabaseRoundtrip,
 } from "@/lib/supabase";
@@ -248,6 +249,141 @@ async function fetchRecoveryConvs(
   const seen = new Set<string>(); const merged: any[] = [];
   for (const b of per) for (const c of b) if (!seen.has(c.id)) { seen.add(c.id); merged.push(c); }
   return merged;
+}
+
+// ── Fetch one conversation's parts -> closes + replies + customer flag ──────
+async function fetchConvParts(token: string, convId: string): Promise<ConvParts> {
+  const r = await fetch(`${INTERCOM_API}/conversations/${convId}`, {
+    headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
+    next: { revalidate: 300 },
+  });
+  if (!r.ok) return { closes: [], replies: [], hadCustomer: false };
+  const d = await r.json();
+  const parts = d.conversation_parts?.conversation_parts ?? [];
+  const closes:  Array<{ adminId: string; at: number }> = [];
+  const replies: Array<{ adminId: string; at: number }> = [];
+  let hadCustomer = d.source?.author?.type === "user" || d.source?.author?.type === "contact";
+  for (const p of parts) {
+    if (p.author?.type === "user" || p.author?.type === "contact") hadCustomer = true;
+    if (p.part_type === "close"   && p.author?.type === "admin")
+      closes.push({ adminId: String(p.author.id), at: p.created_at });
+    if (p.part_type === "comment" && p.author?.type === "admin")
+      replies.push({ adminId: String(p.author.id), at: p.created_at });
+  }
+  return { closes, replies, hadCustomer };
+}
+
+// ── ACCURATE per-day engine (closed all-teammates + replies) ───────────────
+// Resumable: the day's conversation-ID lists are cached once (teep_base under a
+// scan_ key) so re-runs skip the slow searches; per-conversation parts are
+// cached in teep_parts so each is fetched once ever. Closed-in-window counts
+// directly from the last_close_at search (no parts); only reopen-drift recovery
+// and reply counting need parts. Returns partial + complete=false until every
+// needed conversation's parts are cached, then it is exact.
+type AccurateDay = {
+  perAgent: Record<string, { name: string; closed: number; replies: number }>;
+  closedAllTeammates: number; closedTeepAgents: number;
+  repliesAllTeammates: number; repliesTeepAgents: number;
+  recoveryAdded: number; recoveryCandidates: number; recoveryError: string | null;
+  ready: number; total: number; complete: boolean;
+};
+async function accurateDay(
+  uA: number, uB: number, teepSet: Set<string>, nameMap: Record<string, string>,
+  budgetMs: number, startedAt: number,
+): Promise<AccurateDay> {
+  const token   = process.env.INTERCOM_ACCESS_TOKEN!;
+  const crTeams = await getCRTeams();
+  const teamIds = crTeams.map((t: any) => t.id);
+  const scanKey = "scan_" + periodKey(uA, uB);
+
+  type Scan = {
+    closedWCount: number; closedWIds: string[]; replyWIds: string[];
+    recoveryIds: string[]; unattributedClosedWIds: string[];
+    attributedClosed: Record<string, number>; recoveryError: string | null;
+  };
+  let scan = (await readTeepBase(scanKey)) as Scan | null;
+  if (!scan) {
+    const [closedW, replyW] = await Promise.all([
+      fetchConvsAllTeams(token, teamIds, "statistics.last_close_at",       uA, uB),
+      fetchConvsAllTeams(token, teamIds, "statistics.last_admin_reply_at", uA, uB),
+    ]);
+    let recovery: any[] = []; let recoveryError: string | null = null;
+    try { recovery = await fetchRecoveryConvs(token, teamIds, uB); }
+    catch (e: any) { recoveryError = String(e?.message ?? e); }
+
+    const attributedClosed: Record<string, number> = {};
+    const unattributedClosedWIds: string[] = [];
+    for (const c of closedW) {
+      const closerIds = resolveAgent(c, teepSet, "single");
+      if (closerIds.length) attributedClosed[closerIds[0]] = (attributedClosed[closerIds[0]] ?? 0) + 1;
+      else unattributedClosedWIds.push(String(c.id));
+    }
+    scan = {
+      closedWCount: closedW.length,
+      closedWIds:   closedW.map((c: any) => String(c.id)),
+      replyWIds:    replyW.map((c: any) => String(c.id)),
+      recoveryIds:  recovery.map((c: any) => String(c.id)),
+      unattributedClosedWIds, attributedClosed, recoveryError,
+    };
+    await writeTeepBase(scanKey, scan);
+  }
+
+  const need = [...new Set([...scan.replyWIds, ...scan.recoveryIds, ...scan.unattributedClosedWIds])];
+  const cached = await readTeepParts(need);
+  const uncached = need.filter(id => !cached[id]);
+  const BATCH = 25;
+  for (let i = 0; i < uncached.length; i += BATCH) {
+    if (Date.now() - startedAt > budgetMs) break;
+    const batch = uncached.slice(i, i + BATCH);
+    const res   = await Promise.all(batch.map(id => fetchConvParts(token, id)));
+    const recs  = batch.map((id, j) => ({ convId: id, data: res[j] }));
+    for (const rc of recs) cached[rc.convId] = rc.data;
+    await writeTeepParts(recs);
+  }
+  const ready    = need.filter(id => cached[id]).length;
+  const complete = ready >= need.length;
+
+  const agentClosed:  Record<string, number> = { ...scan.attributedClosed };
+  const agentReplies: Record<string, number> = {};
+  const closedWSet = new Set(scan.closedWIds);
+  const recoSet    = new Set(scan.recoveryIds);
+  const unattrSet  = new Set(scan.unattributedClosedWIds);
+  const inWin = (at: number) => at > uA && at < uB;
+
+  let closedAll = scan.closedWCount, recoveryAdded = 0, repliesAll = 0, repliesTeep = 0;
+  for (const id of need) {
+    const p = cached[id]; if (!p) continue;
+    const winCloses   = p.closes.filter(e => inWin(e.at));
+    const winComments = p.replies.filter(e => inWin(e.at));
+    if (recoSet.has(id) && !closedWSet.has(id) && winCloses.length > 0) {
+      closedAll++; recoveryAdded++;
+      const tc = winCloses.filter(e => teepSet.has(e.adminId));
+      if (tc.length) { const last = tc[tc.length - 1].adminId; agentClosed[last] = (agentClosed[last] ?? 0) + 1; }
+    }
+    if (unattrSet.has(id)) {
+      const tc = winCloses.filter(e => teepSet.has(e.adminId));
+      if (tc.length) { const last = tc[tc.length - 1].adminId; agentClosed[last] = (agentClosed[last] ?? 0) + 1; }
+    }
+    if (p.hadCustomer) {
+      for (const cm of winComments) {
+        repliesAll++; if (teepSet.has(cm.adminId)) repliesTeep++;
+        agentReplies[cm.adminId] = (agentReplies[cm.adminId] ?? 0) + 1;
+      }
+    }
+  }
+
+  const perAgent: Record<string, { name: string; closed: number; replies: number }> = {};
+  for (const id of teepSet) perAgent[id] = { name: decodeName(nameMap[id] ?? `id ${id}`), closed: 0, replies: 0 };
+  for (const [id, n] of Object.entries(agentClosed))  if (perAgent[id]) perAgent[id].closed  = n;
+  for (const [id, n] of Object.entries(agentReplies)) if (perAgent[id]) perAgent[id].replies = n;
+  const closedTeep = Object.values(agentClosed).reduce((s, n) => s + n, 0);
+
+  return {
+    perAgent, closedAllTeammates: closedAll, closedTeepAgents: closedTeep,
+    repliesAllTeammates: repliesAll, repliesTeepAgents: repliesTeep,
+    recoveryAdded, recoveryCandidates: scan.recoveryIds.length, recoveryError: scan.recoveryError,
+    ready, total: need.length, complete,
+  };
 }
 // Cached per conversation in Supabase; window filtering happens at aggregation.
 type CloseEvent = { adminId: string; closedAt: number };
@@ -1065,102 +1201,29 @@ export async function GET(req: Request) {
       const dateStr = searchParams.get("date")
         || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
       const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
-      const token   = process.env.INTERCOM_ACCESS_TOKEN!;
       const started = Date.now();
-      const BUDGET  = 45000;
 
-      const crTeams = await getCRTeams();
-      const teamIds = crTeams.map((t: any) => t.id);
       const { nameMap } = await getAdmins();
       const teepAdmins  = await getTeepAdmins();
       const teepSet     = new Set(teepAdmins.map((a: any) => String(a.id)));
 
-      const [closedW, replyW] = await Promise.all([
-        fetchConvsAllTeams(token, teamIds, "statistics.last_close_at",       uA, uB),
-        fetchConvsAllTeams(token, teamIds, "statistics.last_admin_reply_at", uA, uB),
-      ]);
-      let recovery: any[] = []; let recoveryError: string | null = null;
-      try { recovery = await fetchRecoveryConvs(token, teamIds, uB); }
-      catch (e: any) { recoveryError = String(e?.message ?? e); }
-
-      const closedWSet = new Set(closedW.map((c: any) => String(c.id)));
-      const recoSet    = new Set(recovery.map((c: any) => String(c.id)));
-      const scanSet    = new Set<string>();
-      for (const c of [...closedW, ...replyW, ...recovery]) scanSet.add(String(c.id));
-      const scanIds = [...scanSet];
-
-      const partsById: Record<string, any[]> = {};
-      const srcById:   Record<string, any>   = {};
-      let processed = 0, budgetHit = false;
-      for (let i = 0; i < scanIds.length; i += 25) {
-        if (Date.now() - started > BUDGET) { budgetHit = true; break; }
-        const slice = scanIds.slice(i, i + 25);
-        const det = await Promise.all(slice.map(async (id) => {
-          const r = await fetch(`${INTERCOM_API}/conversations/${id}`, {
-            headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
-            next: { revalidate: 300 },
-          });
-          return r.ok ? { id, d: await r.json() } : null;
-        }));
-        for (const x of det) {
-          if (!x) continue;
-          processed++;
-          partsById[x.id] = x.d.conversation_parts?.conversation_parts ?? [];
-          srcById[x.id]   = x.d.source;
-        }
-      }
-
-      let closedAll = 0, closedTeep = 0, repliesAll = 0, repliesTeep = 0, recoveryAdded = 0;
-      const perAgent: Record<string, { name: string; closed: number; replies: number }> = {};
-      const bump = (id: string) =>
-        (perAgent[id] ??= { name: decodeName(nameMap[id] ?? `id ${id}`), closed: 0, replies: 0 });
-
-      for (const id of scanIds) {
-        const ps = partsById[id];
-        if (!ps) continue;
-        const inWinCloses = ps.filter((p: any) =>
-          p.part_type === "close" && p.author?.type === "admin" && p.created_at > uA && p.created_at < uB);
-        const inWinComments = ps.filter((p: any) =>
-          p.part_type === "comment" && p.author?.type === "admin" && p.created_at > uA && p.created_at < uB);
-        const src = srcById[id];
-        const hadCustomer = src?.author?.type === "user" || src?.author?.type === "contact"
-          || ps.some((p: any) => p.author?.type === "user" || p.author?.type === "contact");
-
-        if (inWinCloses.length > 0) {
-          closedAll++;
-          if (recoSet.has(id) && !closedWSet.has(id)) recoveryAdded++;
-          const teepCloses = inWinCloses.filter((c: any) => teepSet.has(String(c.author.id)));
-          if (teepCloses.length > 0) {
-            closedTeep++;
-            bump(String(teepCloses[teepCloses.length - 1].author.id)).closed++;
-          }
-        }
-        if (hadCustomer) {
-          for (const cm of inWinComments) {
-            const aid = String(cm.author.id);
-            repliesAll++;
-            if (teepSet.has(aid)) repliesTeep++;
-            bump(aid).replies++;
-          }
-        }
-      }
-
-      const perAgentArr = Object.values(perAgent)
+      const r = await accurateDay(uA, uB, teepSet, nameMap, 45000, started);
+      const perAgentArr = Object.values(r.perAgent)
         .filter(a => a.closed > 0 || a.replies > 0)
         .sort((a, b) => b.closed - a.closed);
 
       return NextResponse.json({
         date: dateStr,
-        scanSet: scanIds.length, processed, budgetHit,
-        recoveryCandidates: recovery.length, recoveryError, recoveryAdded,
-        closedAllTeammates: closedAll,   // <-- compare to internal "424"
-        closedTeepAgents:   closedTeep,
-        repliesAllTeammates: repliesAll, // <-- compare to internal "replies sent"
-        repliesTeepAgents:   repliesTeep,
+        partsReady: r.ready, partsTotal: r.total, complete: r.complete,
+        recoveryCandidates: r.recoveryCandidates, recoveryError: r.recoveryError, recoveryAdded: r.recoveryAdded,
+        closedAllTeammates:  r.closedAllTeammates,   // <-- compare to internal "424"
+        closedTeepAgents:    r.closedTeepAgents,
+        repliesAllTeammates: r.repliesAllTeammates,  // <-- compare to internal "replies sent"
+        repliesTeepAgents:   r.repliesTeepAgents,
         perAgent: perAgentArr,
-        note: budgetHit
-          ? "PARTIAL scan -- re-run within 5 min; the per-conversation HTTP cache lets it finish, then the totals are real."
-          : "Full scan.",
+        note: r.complete
+          ? "COMPLETE -- numbers are exact."
+          : `PARTIAL (${r.ready}/${r.total} conversations cached). Re-run the same URL; each pass caches more and resumes. Repeat until complete:true.`,
         at: new Date().toISOString(),
       });
     }
