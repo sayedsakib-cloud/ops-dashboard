@@ -12,7 +12,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentRow = {
   name: string;
-  assigned: number; repliedTo: number; closed: number;
+  assigned: number; repliedTo: number; closed: number; repliesSent: number;
   avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
   repliedPerHour: string; closedPerHour: string;
   slaMet: number; slaTotal: number; slaRate: number;
@@ -20,6 +20,7 @@ type AgentRow = {
 type TeepData = {
   summary: {
     totalClosed: number;
+    totalRepliesSent: number;
     avgFrtFmt: string;
     avgHandlingFmt: string;
     slaRate: number;
@@ -251,7 +252,8 @@ export default function TradingEthicsTab() {
 
   const s = data?.summary;
 
-  const TIP_CLOSED     = "Based on admin_assignee_id and teammates at close time. Conversations closed without formal assignment may not be fully captured - typically around 10% below Intercom's Closed by teammates metric due to public API limitations.";
+  const TIP_CLOSED     = "Unique conversations closed by the 12 TEEP agents in the period, counted once each. Includes reply-less closes (duplicates / no-reply-needed) and conversations later reopened, recovered via conversation parts. Matches Intercom's 'Closed by teammates'.";
+  const TIP_REPLIES    = "Total replies (public comments) sent by TEEP agents to customers in the period, counted per reply from conversation parts. Excludes AI/bot replies and internal notes. Matches Intercom's 'Replies sent'.";
   const TIP_FRT        = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only.";
   const TIP_HANDLING   = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
   const TIP_REPLIED_HR = "Conversations replied to divided by number of working days (Mon-Fri) in the period. NOT the same as Intercom's Conv. Replied / Active Hr which uses actual logged-in status time.";
@@ -323,10 +325,13 @@ export default function TradingEthicsTab() {
       {!loading && s ? (
         <div className="space-y-5">
           {/* Summary cards */}
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <SummaryCard label="Emails Closed" tip={TIP_CLOSED}
               value={s.totalClosed.toLocaleString()}
               sub={"Last " + data!.periodDays + (data!.periodDays > 1 ? " days" : " day")} />
+            <SummaryCard label="Replies Sent" tip={TIP_REPLIES}
+              value={(s.totalRepliesSent ?? 0).toLocaleString()}
+              sub="Teammate replies to customers" />
             <SummaryCard label="Avg First Response Time" tip={TIP_FRT}
               value={s.avgFrtFmt} sub="Avg time to first human reply" />
             <SummaryCard label="Top 3 Agents by Closed">
@@ -356,8 +361,9 @@ export default function TradingEthicsTab() {
               <ChevronRight className="ml-auto h-4 w-4 text-amber-500 transition-transform group-open:rotate-90" />
             </summary>
             <div className="mt-3 space-y-2 pl-7 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
-              <p><strong>Why is Emails Closed lower than the Intercom report?</strong> Our count uses the current conversation owner to assign credit. About 7-10% of closures are missed because some agents close conversations without formally claiming them. Intercom tracks every close action at a deeper level not accessible via the public API.</p>
-              <p><strong>Replied / Day and Closed / Day</strong> show how many conversations each agent handled per working day on average. Intercom divides by actual Active-status hours - a much smaller number. These are different metrics and will not match.</p>
+              <p><strong>Emails Closed</strong> now counts unique conversations closed by the 12 TEEP agents, read from conversation parts (close events) rather than the last-close timestamp. Reply-less closes and conversations that were later reopened are included via a recovery pass, so this matches Intercom&apos;s &quot;Closed by teammates&quot;.</p>
+              <p><strong>Replies Sent</strong> counts each public reply a teammate sent to a customer (from conversation parts), excluding AI/bot replies and internal notes.</p>
+              <p><strong>Replied / Day and Closed / Day</strong> divide by working days (Mon-Fri), not Intercom&apos;s Active-status hours, so those per-day rates are a different metric and will not match.</p>
             </div>
           </details>
 
@@ -374,6 +380,7 @@ export default function TradingEthicsTab() {
                     "Teammate",
                     "Conversations Assigned",
                     "Conversations Replied To",
+                    { label: "Replies Sent", tip: TIP_REPLIES },
                     { label: "Closed Conversations", tip: TIP_CLOSED },
                   ]} />
                 </TableHeader>
@@ -382,6 +389,7 @@ export default function TradingEthicsTab() {
                     <TableCell>Summary</TableCell>
                     <TableCell className="text-center">{data!.summaryRow.assigned.toLocaleString()}</TableCell>
                     <TableCell className="text-center">{data!.summaryRow.repliedTo.toLocaleString()}</TableCell>
+                    <TableCell className="text-center">{(data!.summaryRow.repliesSent ?? 0).toLocaleString()}</TableCell>
                     <TableCell className="text-center">{data!.summaryRow.closed.toLocaleString()}</TableCell>
                   </TableRow>
                   {data!.agents.map((row) => (
@@ -394,6 +402,7 @@ export default function TradingEthicsTab() {
                       </TableCell>
                       <TableCell className="text-center font-medium text-muted-foreground">{row.assigned}</TableCell>
                       <TableCell className="text-center font-medium text-muted-foreground">{row.repliedTo}</TableCell>
+                      <TableCell className="text-center font-semibold text-indigo-600 dark:text-indigo-400">{row.repliesSent ?? 0}</TableCell>
                       <TableCell className="text-center font-bold">{row.closed}</TableCell>
                     </TableRow>
                   ))}
