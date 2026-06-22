@@ -6,6 +6,7 @@ import {
   readTeepCache, writeTeepCache,
   readTeepBase,  writeTeepBase,
   readTeepConvs, writeTeepConvs,
+  supabaseEnvPresent, supabaseHealthcheck,
 } from "@/lib/supabase";
 
 const INTERCOM_API  = "https://api.intercom.io";
@@ -479,46 +480,42 @@ function periodKey(uAfter: number, uBefore: number): string {
   return `${a}_${b}`;
 }
 
-// ── Live fallback: full compute in one pass (no caching layer) ─────────────
-async function computeTeepLive(uAfter: number, uBefore: number): Promise<any> {
-  const base = await computeBase(uAfter, uBefore);
-  const teepAdmins = await getTeepAdmins();
-  const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
-  const { agents } = await applyParts(base, uAfter, uBefore, teepAdminIdSet, { useCache: false });
-  return finalize(agents, uAfter, uBefore);
-}
-
 // ── Resumable range compute: cached base + incremental per-conv parts ──────
+// useCache=true  -> read/write teep_base + teep_conv (resumes across requests)
+// useCache=false -> Supabase unavailable: still budgeted, just no persistence
 async function getTeepByConvs(
-  uAfter: number, uBefore: number,
+  uAfter: number, uBefore: number, useCache: boolean = true,
 ): Promise<{ result: any; complete: boolean }> {
   const started   = Date.now();
   const BUDGET_MS = 38000;                 // keep each request well under the 60s cap
   const key       = periodKey(uAfter, uBefore);
 
-  // 1. Base (search + Pass 1/2). If it isn't cached yet, the search alone can be
-  //    slow, so persist the base and return IMMEDIATELY on this request. We do
-  //    not also fetch parts here -- that is what was pushing a cold heavy range
-  //    past the 60s gateway. The auto-reload then fills parts on later requests
-  //    (which skip the search entirely because the base is now cached).
-  const cachedBase = (await readTeepBase(key)) as BaseState | null;
-  if (!cachedBase) {
-    const fresh = await computeBase(uAfter, uBefore);
-    await writeTeepBase(key, fresh);
-    const result = finalize(fresh.agents, uAfter, uBefore);
-    const total  = fresh.needsParts.length;
-    result.partial = total > 0;
-    result.ready   = 0;
-    result.total   = total;
-    return { result, complete: total === 0 };
+  // 1. Base (search + Pass 1/2).
+  let base: BaseState | null = useCache ? ((await readTeepBase(key)) as BaseState | null) : null;
+  if (!base) {
+    base = await computeBase(uAfter, uBefore);
+    if (useCache) {
+      // Persist the base and return IMMEDIATELY on this cold request, so the
+      // heavy search alone can never combine with parts to exceed 60s. Parts
+      // fill in on later (auto-reload) requests, which skip the search.
+      await writeTeepBase(key, base);
+      const result = finalize(base.agents, uAfter, uBefore);
+      const total  = base.needsParts.length;
+      result.partial = total > 0;
+      result.ready   = 0;
+      result.total   = total;
+      return { result, complete: total === 0 };
+    }
+    // useCache=false: nothing persists, so returning here would loop forever at
+    // 0 parts. Fall through and do parts in THIS request, within the budget.
   }
 
-  // 2. Base is cached -> spend this request's whole budget on parts only.
+  // 2. Base ready -> spend this request's remaining budget on parts.
   const teepAdmins     = await getTeepAdmins();
   const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
   const { agents, complete, ready, total } = await applyParts(
-    cachedBase, uAfter, uBefore, teepAdminIdSet,
-    { useCache: true, budgetMs: BUDGET_MS, startedAt: started },
+    base, uAfter, uBefore, teepAdminIdSet,
+    { useCache, budgetMs: BUDGET_MS, startedAt: started },
   );
 
   const result = finalize(agents, uAfter, uBefore);
@@ -545,27 +542,25 @@ function isUsableResult(r: any): boolean {
 
 // ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
-  // No Supabase configured -> live compute (no caching; slower for big ranges).
-  if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-    return await computeTeepLive(uAfter, uBefore);
-  }
-
+  const haveSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
   const key = periodKey(uAfter, uBefore);
 
   // 1. Finished range cached -> instant. Ignore empty/poisoned rows and recompute.
-  const cached = await readTeepCache(key);
-  if (isUsableResult(cached)) return cached;
-
-  // 2. Build incrementally from cached base + per-conversation parts.
-  try {
-    const { result, complete } = await getTeepByConvs(uAfter, uBefore);
-    // Only freeze a finished range that actually has data -- never cache an empty.
-    if (complete && isUsableResult(result)) await writeTeepCache(key, result);
-    return result;
-  } catch {
-    // 3. Pipeline/Supabase failure -> degrade to a live full compute.
-    return await computeTeepLive(uAfter, uBefore);
+  if (haveSupabase) {
+    const cached = await readTeepCache(key);
+    if (isUsableResult(cached)) return cached;
   }
+
+  // 2. Budgeted compute (resumable when Supabase is available, still budgeted
+  //    when it is not). A heavy range returns a PARTIAL within the budget rather
+  //    than running past the 60s cap -- so there is never a hard timeout that the
+  //    UI mistranslates into an endless "still computing". Real failures (Intercom
+  //    errors, etc.) propagate to the route handler and surface as a clear error.
+  const { result, complete } = await getTeepByConvs(uAfter, uBefore, haveSupabase);
+  if (haveSupabase && complete && isUsableResult(result)) {
+    await writeTeepCache(key, result);
+  }
+  return result;
 }
 
 // ── Cron helper: warm yesterday's range ───────────────────────────────────
@@ -599,6 +594,17 @@ export async function GET(req: Request) {
     if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
     const { searchParams } = new URL(req.url);
+
+    // ── Diagnostics: /api/teep?diag=1 -> reports cache health, no Intercom work.
+    if (searchParams.get("diag") === "1") {
+      return NextResponse.json({
+        env: supabaseEnvPresent(),
+        intercomTokenPresent: !!process.env.INTERCOM_ACCESS_TOKEN,
+        supabase: await supabaseHealthcheck(),
+        at: new Date().toISOString(),
+      });
+    }
+
     const startDate = searchParams.get("startDate") ?? "";
     const endDate   = searchParams.get("endDate")   ?? "";
 
