@@ -60,6 +60,27 @@ export async function supabaseHealthcheck() {
   return { connected: true, tables };
 }
 
+// Definitive persistence test: write a known value to teep_conv, read it back,
+// compare, then delete. "persisted: true" proves writes actually land (catches
+// the case where upsert returns no error but RLS silently drops the row).
+export async function supabaseRoundtrip() {
+  const c = client();
+  if (!c) return { ok: false, reason: "env-missing" };
+  const probe = { conv_id: "__roundtrip__", closes: [{ adminId: "rt", closedAt: 4242 }], cached_at: new Date().toISOString() };
+  try {
+    const { error: wErr } = await c.from("teep_conv").upsert(probe);
+    if (wErr) return { ok: false, stage: "write", error: wErr.message };
+    const { data, error: rErr } = await c
+      .from("teep_conv").select("closes").eq("conv_id", "__roundtrip__").maybeSingle();
+    if (rErr) return { ok: false, stage: "read", error: rErr.message };
+    const persisted = !!(data && Array.isArray(data.closes) && data.closes[0]?.closedAt === 4242);
+    await c.from("teep_conv").delete().eq("conv_id", "__roundtrip__");
+    return { ok: persisted, persisted, readBack: data?.closes ?? null };
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 // ── teep_cache: finished results per period_key ────────────────────────────
 export async function readTeepCache(key: string): Promise<any | null> {
   const c = client(); if (!c) return null;
