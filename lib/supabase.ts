@@ -148,6 +148,41 @@ export async function writeTeepConvs(
   } catch { /* ignore */ }
 }
 
+// ── teep_parts: per-conversation closes + replies + customer flag ──────────
+// One row per conversation, fetched once and reused across every day/range that
+// touches it. This is what makes the accurate closed + replies metrics tractable
+// inside the 60s limit: the parts fetch is paid once, then aggregation is free.
+export type ConvParts = {
+  closes:  Array<{ adminId: string; at: number }>;
+  replies: Array<{ adminId: string; at: number }>;
+  hadCustomer: boolean;
+};
+export async function readTeepParts(ids: string[]): Promise<Record<string, ConvParts>> {
+  const c = client(); if (!c || ids.length === 0) return {};
+  const out: Record<string, ConvParts> = {};
+  try {
+    const CHUNK = 300;
+    for (let i = 0; i < ids.length; i += CHUNK) {
+      const slice = ids.slice(i, i + CHUNK);
+      const { data, error } = await c
+        .from("teep_parts").select("conv_id, data").in("conv_id", slice);
+      if (error || !data) continue;
+      for (const row of data) if (row.data) out[row.conv_id] = row.data as ConvParts;
+    }
+  } catch { /* ignore */ }
+  return out;
+}
+export async function writeTeepParts(
+  records: Array<{ convId: string; data: ConvParts }>,
+): Promise<void> {
+  const c = client(); if (!c || records.length === 0) return;
+  try {
+    const now = new Date().toISOString();
+    const rows = records.map(r => ({ conv_id: r.convId, data: r.data, cached_at: now }));
+    await c.from("teep_parts").upsert(rows);
+  } catch { /* ignore */ }
+}
+
 // ── teep_day: LEGACY (no longer used by the route). Kept for compatibility. ─
 export async function readTeepDays(days: string[]): Promise<Record<string, any>> {
   const c = client(); if (!c || days.length === 0) return {};
