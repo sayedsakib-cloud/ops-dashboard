@@ -281,7 +281,7 @@ async function fetchConvParts(token: string, convId: string): Promise<ConvParts>
 // and reply counting need parts. Returns partial + complete=false until every
 // needed conversation's parts are cached, then it is exact.
 type AccurateDay = {
-  perAgent: Record<string, { name: string; closed: number; replies: number }>;
+  perAgent: Record<string, { name: string; closed: number; replies: number; repliedTo: number }>;
   closedAllTeammates: number; closedTeepAgents: number;
   repliesAllTeammates: number; repliesTeepAgents: number;
   recoveryAdded: number; recoveryCandidates: number; recoveryError: string | null;
@@ -294,12 +294,11 @@ async function accurateDay(
   const token   = process.env.INTERCOM_ACCESS_TOKEN!;
   const crTeams = await getCRTeams();
   const teamIds = crTeams.map((t: any) => t.id);
-  const scanKey = "scan_" + periodKey(uA, uB);
+  const scanKey = "scan2_" + periodKey(uA, uB);
 
   type Scan = {
-    closedWCount: number; closedWIds: string[]; replyWIds: string[];
-    recoveryIds: string[]; unattributedClosedWIds: string[];
-    attributedClosed: Record<string, number>; recoveryError: string | null;
+    closedWIds: string[]; replyWIds: string[];
+    recoveryIds: string[]; recoveryError: string | null;
   };
   let scan = (await readTeepBase(scanKey)) as Scan | null;
   if (!scan) {
@@ -310,25 +309,19 @@ async function accurateDay(
     let recovery: any[] = []; let recoveryError: string | null = null;
     try { recovery = await fetchRecoveryConvs(token, teamIds, uB); }
     catch (e: any) { recoveryError = String(e?.message ?? e); }
-
-    const attributedClosed: Record<string, number> = {};
-    const unattributedClosedWIds: string[] = [];
-    for (const c of closedW) {
-      const closerIds = resolveAgent(c, teepSet, "single");
-      if (closerIds.length) attributedClosed[closerIds[0]] = (attributedClosed[closerIds[0]] ?? 0) + 1;
-      else unattributedClosedWIds.push(String(c.id));
-    }
     scan = {
-      closedWCount: closedW.length,
-      closedWIds:   closedW.map((c: any) => String(c.id)),
-      replyWIds:    replyW.map((c: any) => String(c.id)),
-      recoveryIds:  recovery.map((c: any) => String(c.id)),
-      unattributedClosedWIds, attributedClosed, recoveryError,
+      closedWIds:  closedW.map((c: any) => String(c.id)),
+      replyWIds:   replyW.map((c: any) => String(c.id)),
+      recoveryIds: recovery.map((c: any) => String(c.id)),
+      recoveryError,
     };
     await writeTeepBase(scanKey, scan);
   }
 
-  const need = [...new Set([...scan.replyWIds, ...scan.recoveryIds, ...scan.unattributedClosedWIds])];
+  // Parts are needed for EVERY candidate -- closed attribution must come from the
+  // actual close event author (not the current assignee), and replies/replied-to
+  // from the actual comment author. So we fetch parts for the full union.
+  const need = [...new Set([...scan.closedWIds, ...scan.replyWIds, ...scan.recoveryIds])];
   const cached = await readTeepParts(need);
   const uncached = need.filter(id => !cached[id]);
   const BATCH = 25;
@@ -343,43 +336,60 @@ async function accurateDay(
   const ready    = need.filter(id => cached[id]).length;
   const complete = ready >= need.length;
 
-  const agentClosed:  Record<string, number> = { ...scan.attributedClosed };
-  const agentReplies: Record<string, number> = {};
   const closedWSet = new Set(scan.closedWIds);
   const recoSet    = new Set(scan.recoveryIds);
-  const unattrSet  = new Set(scan.unattributedClosedWIds);
   const inWin = (at: number) => at > uA && at < uB;
 
-  let closedAll = scan.closedWCount, recoveryAdded = 0, repliesAll = 0, repliesTeep = 0;
+  const agentClosed:   Record<string, number> = {};
+  const agentReplies:  Record<string, number> = {};
+  const agentRepliedTo: Record<string, number> = {};
+  const closedAllConvs = new Set<string>();
+  const closedTeepConvs = new Set<string>();
+  let recoveryAdded = 0, repliesAll = 0, repliesTeep = 0;
+
   for (const id of need) {
     const p = cached[id]; if (!p) continue;
     const winCloses   = p.closes.filter(e => inWin(e.at));
     const winComments = p.replies.filter(e => inWin(e.at));
-    if (recoSet.has(id) && !closedWSet.has(id) && winCloses.length > 0) {
-      closedAll++; recoveryAdded++;
-      const tc = winCloses.filter(e => teepSet.has(e.adminId));
-      if (tc.length) { const last = tc[tc.length - 1].adminId; agentClosed[last] = (agentClosed[last] ?? 0) + 1; }
-    }
-    if (unattrSet.has(id)) {
-      const tc = winCloses.filter(e => teepSet.has(e.adminId));
-      if (tc.length) { const last = tc[tc.length - 1].adminId; agentClosed[last] = (agentClosed[last] ?? 0) + 1; }
-    }
-    if (p.hadCustomer) {
-      for (const cm of winComments) {
-        repliesAll++; if (teepSet.has(cm.adminId)) repliesTeep++;
-        agentReplies[cm.adminId] = (agentReplies[cm.adminId] ?? 0) + 1;
+
+    // ── Closed: a conversation a teammate closed in-window, counted once and
+    //    credited to the actual LAST in-window teammate closer. ──────────────
+    if (winCloses.length > 0) {
+      closedAllConvs.add(id);
+      if (recoSet.has(id) && !closedWSet.has(id)) recoveryAdded++;
+      const teepCloses = winCloses.filter(e => teepSet.has(e.adminId));
+      if (teepCloses.length > 0) {
+        closedTeepConvs.add(id);
+        const closer = teepCloses[teepCloses.length - 1].adminId;
+        agentClosed[closer] = (agentClosed[closer] ?? 0) + 1;
       }
+    }
+
+    // ── Replies: every in-window teammate comment on a customer conversation.
+    //    Replies Sent = per comment; Replied To = distinct conversations. ─────
+    if (p.hadCustomer && winComments.length > 0) {
+      const repliersThisConv = new Set<string>();
+      for (const cm of winComments) {
+        repliesAll++;
+        if (teepSet.has(cm.adminId)) {
+          repliesTeep++;
+          agentReplies[cm.adminId] = (agentReplies[cm.adminId] ?? 0) + 1;
+          repliersThisConv.add(cm.adminId);
+        }
+      }
+      for (const rid of repliersThisConv) agentRepliedTo[rid] = (agentRepliedTo[rid] ?? 0) + 1;
     }
   }
 
-  const perAgent: Record<string, { name: string; closed: number; replies: number }> = {};
-  for (const id of teepSet) perAgent[id] = { name: decodeName(nameMap[id] ?? `id ${id}`), closed: 0, replies: 0 };
-  for (const [id, n] of Object.entries(agentClosed))  if (perAgent[id]) perAgent[id].closed  = n;
-  for (const [id, n] of Object.entries(agentReplies)) if (perAgent[id]) perAgent[id].replies = n;
-  const closedTeep = Object.values(agentClosed).reduce((s, n) => s + n, 0);
+  const perAgent: Record<string, { name: string; closed: number; replies: number; repliedTo: number }> = {};
+  for (const id of teepSet) perAgent[id] = { name: decodeName(nameMap[id] ?? `id ${id}`), closed: 0, replies: 0, repliedTo: 0 };
+  for (const [id, n] of Object.entries(agentClosed))    if (perAgent[id]) perAgent[id].closed    = n;
+  for (const [id, n] of Object.entries(agentReplies))   if (perAgent[id]) perAgent[id].replies   = n;
+  for (const [id, n] of Object.entries(agentRepliedTo)) if (perAgent[id]) perAgent[id].repliedTo = n;
 
   return {
-    perAgent, closedAllTeammates: closedAll, closedTeepAgents: closedTeep,
+    perAgent,
+    closedAllTeammates: closedAllConvs.size, closedTeepAgents: closedTeepConvs.size,
     repliesAllTeammates: repliesAll, repliesTeepAgents: repliesTeep,
     recoveryAdded, recoveryCandidates: scan.recoveryIds.length, recoveryError: scan.recoveryError,
     ready, total: need.length, complete,
@@ -765,19 +775,30 @@ async function computeDayRaw(
   for (const [id, a] of Object.entries(base.agents)) nameMap[id] = a.name;
   const acc = await accurateDay(uA, uB, teepAdminIdSet, nameMap, budgetMs, startedAt);
 
-  // Merge: keep base stats, OVERRIDE closed with accurate, ADD repliesSent.
+  // Merge: keep base stats (assigned, FRT/SLA/handling), OVERRIDE the three
+  // actor-attributed metrics with the parts-based truth so inactive assignees
+  // are no longer credited.
   const agents: RawPayload = {};
   for (const [id, a] of Object.entries(base.agents)) {
-    agents[id] = { ...a, closed: 0, repliesSent: 0 };
+    agents[id] = { ...a, closed: 0, repliesSent: 0, repliedTo: 0 };
   }
   for (const [id, pa] of Object.entries(acc.perAgent)) {
     const row = (agents[id] ??= emptyRaw(pa.name));
     row.closed      = pa.closed;
     row.repliesSent = pa.replies;
+    row.repliedTo   = pa.repliedTo;
+  }
+  // Drop time-stats for anyone with no actual in-window activity so they neither
+  // show as a ghost row nor skew the summary averages.
+  for (const a of Object.values(agents)) {
+    if (a.closed === 0 && a.repliesSent === 0 && a.repliedTo === 0) {
+      a.frtSum = a.frtN = a.handlingSum = a.handlingN = a.atfSum = a.atfN = 0;
+      a.slaMet = a.slaTotal = 0;
+    }
   }
 
   const complete = acc.complete;
-  if (complete && useCache) await writeTeepDay("v2_" + day, agents); // freeze the finished day
+  if (complete && useCache) await writeTeepDay("v3_" + day, agents); // freeze the finished day
   return { agents, complete };
 }
 
@@ -800,13 +821,13 @@ async function getTeepByDays(
   // 1. Pull every already-cached complete day in one batch (cheap). v2 = new
   //    accurate-closed + replies engine; old unversioned rows are ignored.
   const cached: Record<string, RawPayload> = useCache
-    ? (await readTeepDays(days.map(d => "v2_" + d))) as Record<string, RawPayload>
+    ? (await readTeepDays(days.map(d => "v3_" + d))) as Record<string, RawPayload>
     : {};
 
   const merged: RawPayload = {};
   const missing: string[] = [];
   for (const d of days) {
-    if (cached["v2_" + d]) mergeRaw(merged, cached["v2_" + d]);
+    if (cached["v3_" + d]) mergeRaw(merged, cached["v3_" + d]);
     else missing.push(d);
   }
 
@@ -845,7 +866,7 @@ function isUsableResult(r: any): boolean {
 // ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
   const haveSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const key = "v2_" + periodKey(uAfter, uBefore);
+  const key = "v3_" + periodKey(uAfter, uBefore);
 
   // 1. Finished range cached -> instant. Ignore empty/poisoned rows and recompute.
   if (haveSupabase) {
