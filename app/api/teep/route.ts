@@ -6,6 +6,7 @@ import {
   readTeepCache, writeTeepCache,
   readTeepBase,  writeTeepBase,
   readTeepConvs, writeTeepConvs,
+  readTeepDays,  writeTeepDay,
   supabaseEnvPresent, supabaseHealthcheck, supabaseRoundtrip,
 } from "@/lib/supabase";
 
@@ -522,49 +523,103 @@ async function measureDay(dateStr: string) {
   };
 }
 
-// ── Resumable range compute: cached base + incremental per-conv parts ──────
-// useCache=true  -> read/write teep_base + teep_conv (resumes across requests)
-// useCache=false -> Supabase unavailable: still budgeted, just no persistence
-async function getTeepByConvs(
+// ── Per-day helpers ────────────────────────────────────────────────────────
+// List the Dhaka (+06) calendar days covered by a range, inclusive.
+function listDays(uAfter: number, uBefore: number): string[] {
+  const days: string[] = [];
+  const startShift = new Date(uAfter  * 1000 + 6 * 3600 * 1000);
+  const endShift   = new Date(uBefore * 1000 + 6 * 3600 * 1000);
+  let cur = new Date(Date.UTC(startShift.getUTCFullYear(), startShift.getUTCMonth(), startShift.getUTCDate()));
+  const end = new Date(Date.UTC(endShift.getUTCFullYear(), endShift.getUTCMonth(), endShift.getUTCDate()));
+  while (cur <= end) {
+    days.push(cur.toISOString().slice(0, 10));
+    cur = new Date(cur.getTime() + 86400000);
+  }
+  return days;
+}
+
+// Component-wise sum of per-agent accumulators (the metrics are stored as
+// sums + counts, so summing across days is exact -- no double counting).
+function mergeRaw(target: RawPayload, src: RawPayload): void {
+  for (const [id, a] of Object.entries(src)) {
+    const t = target[id] ?? (target[id] = emptyRaw(a.name));
+    if (!t.name && a.name) t.name = a.name;
+    t.assigned    += a.assigned;    t.repliedTo += a.repliedTo;  t.closed += a.closed;
+    t.frtSum      += a.frtSum;      t.frtN      += a.frtN;
+    t.handlingSum += a.handlingSum; t.handlingN += a.handlingN;
+    t.atfSum      += a.atfSum;      t.atfN      += a.atfN;
+    t.slaMet      += a.slaMet;      t.slaTotal  += a.slaTotal;
+  }
+}
+
+// Compute (or read) ONE day's post-parts accumulator. A completed day is cached
+// in teep_day and never recomputed (closed days are immutable). A heavy day whose
+// parts don't finish in budget returns complete=false and resumes via teep_conv
+// on the next request (its already-fetched parts are cached, so it speeds up).
+async function computeDayRaw(
+  day: string, teepAdminIdSet: Set<string>,
+  useCache: boolean, budgetMs: number, startedAt: number,
+): Promise<{ agents: RawPayload; complete: boolean }> {
+  const uA = toUnixStart(day), uB = toUnixEnd(day);
+  const dayKey = periodKey(uA, uB);
+
+  // Per-day base (small single-day search): reuse cached, else compute + cache.
+  let base: BaseState | null = useCache ? ((await readTeepBase(dayKey)) as BaseState | null) : null;
+  if (!base) {
+    base = await computeBase(uA, uB);
+    if (useCache) await writeTeepBase(dayKey, base);
+  }
+
+  const { agents, complete } = await applyParts(
+    base, uA, uB, teepAdminIdSet, { useCache, budgetMs, startedAt },
+  );
+  if (complete && useCache) await writeTeepDay(day, agents); // freeze the finished day
+  return { agents, complete };
+}
+
+// ── Resumable RANGE compute: sum of per-day accumulators ───────────────────
+// Wide ranges never run one giant multi-day search (that is what hit the 60s
+// cap). Instead each day is computed once (small search) and summed. Cached days
+// are free; missing days are computed within a wall-clock budget; the rest fill
+// in on auto-reload. useCache=false (no Supabase) still works for a single day
+// and stays budgeted for wider ones (just cannot resume across requests).
+async function getTeepByDays(
   uAfter: number, uBefore: number, useCache: boolean = true,
 ): Promise<{ result: any; complete: boolean }> {
   const started   = Date.now();
-  const BUDGET_MS = 38000;                 // keep each request well under the 60s cap
-  const key       = periodKey(uAfter, uBefore);
+  const BUDGET_MS = 42000;                       // return before the 60s cap
+  const days      = listDays(uAfter, uBefore);
 
-  // 1. Base (search + Pass 1/2).
-  let base: BaseState | null = useCache ? ((await readTeepBase(key)) as BaseState | null) : null;
-  if (!base) {
-    base = await computeBase(uAfter, uBefore);
-    if (useCache) {
-      // Persist the base and return IMMEDIATELY on this cold request, so the
-      // heavy search alone can never combine with parts to exceed 60s. Parts
-      // fill in on later (auto-reload) requests, which skip the search.
-      await writeTeepBase(key, base);
-      const result = finalize(base.agents, uAfter, uBefore);
-      const total  = base.needsParts.length;
-      result.partial = total > 0;
-      result.ready   = 0;
-      result.total   = total;
-      return { result, complete: total === 0 };
-    }
-    // useCache=false: nothing persists, so returning here would loop forever at
-    // 0 parts. Fall through and do parts in THIS request, within the budget.
-  }
-
-  // 2. Base ready -> spend this request's remaining budget on parts.
   const teepAdmins     = await getTeepAdmins();
   const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
-  const { agents, complete, ready, total } = await applyParts(
-    base, uAfter, uBefore, teepAdminIdSet,
-    { useCache, budgetMs: BUDGET_MS, startedAt: started },
-  );
 
-  const result = finalize(agents, uAfter, uBefore);
-  result.partial = !complete;
-  result.ready   = ready;   // conversations whose close attribution is resolved
-  result.total   = total;   // conversations needing parts-level attribution
-  return { result, complete };
+  // 1. Pull every already-cached complete day in one batch (cheap).
+  const cached: Record<string, RawPayload> = useCache
+    ? (await readTeepDays(days)) as Record<string, RawPayload>
+    : {};
+
+  const merged: RawPayload = {};
+  const missing: string[] = [];
+  for (const d of days) {
+    if (cached[d]) mergeRaw(merged, cached[d]);
+    else missing.push(d);
+  }
+
+  // 2. Compute missing days within the budget (oldest first).
+  let daysDone = days.length - missing.length;
+  let allComplete = missing.length === 0;
+  for (const d of missing) {
+    if (Date.now() - started > BUDGET_MS) { allComplete = false; break; }
+    const { agents, complete } = await computeDayRaw(d, teepAdminIdSet, useCache, BUDGET_MS, started);
+    mergeRaw(merged, agents);
+    if (complete) daysDone++; else allComplete = false;
+  }
+
+  const result = finalize(merged, uAfter, uBefore);
+  result.partial = !allComplete;
+  result.ready   = daysDone;       // days fully resolved
+  result.total   = days.length;    // days in range
+  return { result, complete: allComplete };
 }
 
 // ── Self-healing guard ─────────────────────────────────────────────────────
@@ -593,14 +648,18 @@ export async function getTeepCached(uAfter: number, uBefore: number): Promise<an
     if (isUsableResult(cached)) return cached;
   }
 
-  // 2. Budgeted compute (resumable when Supabase is available, still budgeted
-  //    when it is not). A heavy range returns a PARTIAL within the budget rather
-  //    than running past the 60s cap -- so there is never a hard timeout that the
-  //    UI mistranslates into an endless "still computing". Real failures (Intercom
-  //    errors, etc.) propagate to the route handler and surface as a clear error.
-  const { result, complete } = await getTeepByConvs(uAfter, uBefore, haveSupabase);
+  // 2. Budgeted per-day compute. Wide ranges are summed from per-day pieces, so
+  //    no single request ever runs a giant multi-day search past the 60s cap.
+  const { result, complete } = await getTeepByDays(uAfter, uBefore, haveSupabase);
   if (haveSupabase && complete && isUsableResult(result)) {
     await writeTeepCache(key, result);
+  }
+
+  // If a range is stuck partial, tell the client WHETHER persistence works, so a
+  // broken cache surfaces as a clear message instead of an endless retry loop.
+  if (result.partial && haveSupabase) {
+    const rt = await supabaseRoundtrip();
+    result.cacheHealthy = rt.ok === true;
   }
   return result;
 }
