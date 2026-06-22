@@ -6,7 +6,7 @@ import {
   readTeepCache, writeTeepCache,
   readTeepBase,  writeTeepBase,
   readTeepConvs, writeTeepConvs,
-  supabaseEnvPresent, supabaseHealthcheck,
+  supabaseEnvPresent, supabaseHealthcheck, supabaseRoundtrip,
 } from "@/lib/supabase";
 
 const INTERCOM_API  = "https://api.intercom.io";
@@ -480,6 +480,48 @@ function periodKey(uAfter: number, uBefore: number): string {
   return `${a}_${b}`;
 }
 
+// ── Measured single-day diagnostic ─────────────────────────────────────────
+// Times the search (computeBase) and ONE parts batch for a single day, so it
+// can never itself exceed 60s. From these numbers we can tell exactly which
+// operation is the bottleneck and extrapolate to multi-day ranges.
+async function measureDay(dateStr: string) {
+  const uAfter  = toUnixStart(dateStr);
+  const uBefore = toUnixEnd(dateStr);
+
+  const t0 = Date.now();
+  const base = await computeBase(uAfter, uBefore);
+  const baseMs = Date.now() - t0;
+
+  const teepAdmins     = await getTeepAdmins();
+  const teepAdminIdSet = new Set(teepAdmins.map((a: any) => String(a.id)));
+  const token          = process.env.INTERCOM_ACCESS_TOKEN!;
+
+  // Time ONE batch of up to 30 per-conversation parts fetches.
+  const sample = base.needsParts.slice(0, 30);
+  const t1 = Date.now();
+  await Promise.all(sample.map(id => fetchAllCloseEvents(token, id)));
+  const batchMs = sample.length > 0 ? Date.now() - t1 : 0;
+
+  const totalNeeds   = base.needsParts.length;
+  const perConvMs    = sample.length > 0 ? Math.round(batchMs / sample.length) : 0;
+  const estPartsMs    = perConvMs * totalNeeds; // rough; batches of 30 run in parallel
+  const attributed   = Object.values(base.agents).reduce((s, a) => s + a.closed, 0);
+
+  return {
+    date: dateStr,
+    search:    { ms: baseMs, activityConvs: Object.keys(base.agents).length },
+    closedAttributedSoFar: attributed,
+    needsParts: totalNeeds,
+    partsBatch: { sampled: sample.length, ms: batchMs, perConvMs },
+    estimatedFullPartsMs: estPartsMs,
+    verdict:
+      baseMs > 45000 ? "SEARCH is the bottleneck (one day's search alone is too slow)"
+      : totalNeeds * perConvMs > 35000 ? "PARTS volume is the bottleneck for this day"
+      : "this single day fits comfortably; multi-day ranges are the problem -> chunk by day",
+    at: new Date().toISOString(),
+  };
+}
+
 // ── Resumable range compute: cached base + incremental per-conv parts ──────
 // useCache=true  -> read/write teep_base + teep_conv (resumes across requests)
 // useCache=false -> Supabase unavailable: still budgeted, just no persistence
@@ -595,14 +637,25 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
 
-    // ── Diagnostics: /api/teep?diag=1 -> reports cache health, no Intercom work.
-    if (searchParams.get("diag") === "1") {
+    // ── Diagnostics ─────────────────────────────────────────────────────────
+    // ?diag=1                  -> cache health + persistence round-trip (no Intercom).
+    // ?diag=2&date=YYYY-MM-DD  -> measured single-day timing (safe, < 60s).
+    const diag = searchParams.get("diag");
+    if (diag === "1") {
       return NextResponse.json({
         env: supabaseEnvPresent(),
         intercomTokenPresent: !!process.env.INTERCOM_ACCESS_TOKEN,
         supabase: await supabaseHealthcheck(),
+        persistenceRoundtrip: await supabaseRoundtrip(),
         at: new Date().toISOString(),
       });
+    }
+    if (diag === "2") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN)
+        throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10); // yesterday (Dhaka)
+      return NextResponse.json(await measureDay(dateStr));
     }
 
     const startDate = searchParams.get("startDate") ?? "";
@@ -611,10 +664,12 @@ export async function GET(req: Request) {
     if (!process.env.INTERCOM_ACCESS_TOKEN)
       throw new Error("INTERCOM_ACCESS_TOKEN not set");
 
-    // Default (no params) = last 7 completed days ending yesterday.
-    const last7 = defaultWindows().find(w => w.label === "last7")!;
-    const uAfter  = startDate ? toUnixStart(startDate) : last7.uAfter;
-    const uBefore = endDate   ? toUnixEnd(endDate)     : last7.uBefore;
+    // Default (no params) = YESTERDAY only. A single day's search is small and
+    // returns fast; the previous 7-day default ran one giant search that the
+    // 60s Hobby limit kills on tab open. Users pick wider ranges explicitly.
+    const yest = defaultWindows().find(w => w.label === "yesterday")!;
+    const uAfter  = startDate ? toUnixStart(startDate) : yest.uAfter;
+    const uBefore = endDate   ? toUnixEnd(endDate)     : yest.uBefore;
 
     const data = await getTeepCached(uAfter, uBefore);
     return NextResponse.json(data);
