@@ -804,6 +804,128 @@ export async function GET(req: Request) {
       });
     }
 
+    // ?diag=6&date=YYYY-MM-DD -> REPLIES probe. Counts teammate comment replies
+    // (part_type "comment", admin author) sent inside the window, on conversations
+    // a customer participated in. Budgeted; reports coverage so we know if a heavy
+    // day was only partially scanned. Mirrors internal "teammate replies sent".
+    if (diag === "6") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
+      const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
+      const token   = process.env.INTERCOM_ACCESS_TOKEN!;
+      const started = Date.now();
+      const BUDGET  = 42000;
+
+      const crTeams = await getCRTeams();
+      const { nameMap } = await getAdmins();
+      const teepAdmins  = await getTeepAdmins();
+      const teepIdSet   = new Set(teepAdmins.map((a: any) => String(a.id)));
+
+      // Conversations whose last admin reply landed in the window (proxy for
+      // "conversations with a reply this day"; a reply followed by a later reply
+      // outside the window is the same drift caveat as closes).
+      const convs = await fetchConvsAllTeams(
+        token, crTeams.map((t: any) => t.id), "statistics.last_admin_reply_at", uA, uB,
+      );
+
+      const perId: Record<string, { name: string; isTeep: boolean; replies: number }> = {};
+      let convsProcessed = 0, convsWithCustomer = 0, totalReplies = 0, teepReplies = 0;
+      let budgetHit = false;
+
+      for (let i = 0; i < convs.length; i += 20) {
+        if (Date.now() - started > BUDGET) { budgetHit = true; break; }
+        const slice = convs.slice(i, i + 20);
+        const detailed = await Promise.all(slice.map(async (c: any) => {
+          const r = await fetch(`${INTERCOM_API}/conversations/${c.id}`, {
+            headers: { Authorization: `Bearer ${token}`, "Intercom-Version": "2.11" },
+            next: { revalidate: 300 },
+          });
+          if (!r.ok) return null;
+          return r.json();
+        }));
+        for (const d of detailed) {
+          if (!d) continue;
+          convsProcessed++;
+          const parts = d.conversation_parts?.conversation_parts ?? [];
+          const hadCustomer =
+            d.source?.author?.type === "user" || d.source?.author?.type === "contact" ||
+            parts.some((p: any) => p.author?.type === "user" || p.author?.type === "contact");
+          if (hadCustomer) convsWithCustomer++;
+          for (const p of parts) {
+            if (p.part_type === "comment" && p.author?.type === "admin"
+                && p.created_at > uA && p.created_at < uB) {
+              const id = String(p.author.id);
+              const isTeep = teepIdSet.has(id);
+              perId[id] ??= { name: nameMap[id] ?? `Admin ${id}`, isTeep, replies: 0 };
+              perId[id].replies++;
+              totalReplies++;
+              if (isTeep) teepReplies++;
+            }
+          }
+        }
+      }
+
+      const perAgent = Object.values(perId).sort((a, b) => b.replies - a.replies);
+      return NextResponse.json({
+        date: dateStr,
+        convsWithReplyInWindow: convs.length,   // universe found by the search
+        convsProcessed,                         // how many we actually scanned (budget)
+        budgetHit,                              // true => heavy day, only partial scan
+        convsWithCustomer,
+        totalTeammateReplies: totalReplies,     // compare to internal "replies sent"
+        teepAgentReplies: teepReplies,          // subset by your 12 agents
+        perAgent,
+        note: budgetHit
+          ? "Partial scan (heavy day) -- totals are a floor, not the full count."
+          : "Full scan of conversations whose last reply was in-window.",
+        at: new Date().toISOString(),
+      });
+    }
+
+    // ?diag=7&date=YYYY-MM-DD -> DAY TRACE. Times computeBase vs the parts pass for
+    // one day so we can see why a day (e.g. 2026-06-16) will not finish. Cold, no
+    // cache, but honours the same 42s budget the real per-day path uses.
+    if (diag === "7") {
+      if (!process.env.INTERCOM_ACCESS_TOKEN) throw new Error("INTERCOM_ACCESS_TOKEN not set");
+      const dateStr = searchParams.get("date")
+        || new Date(Date.now() + 6 * 3600 * 1000 - 86400000).toISOString().slice(0, 10);
+      const uA = toUnixStart(dateStr), uB = toUnixEnd(dateStr);
+      const started = Date.now();
+
+      const t0 = Date.now();
+      const base = await computeBase(uA, uB);
+      const baseMs = Date.now() - t0;
+      const needsParts = base.needsParts.length;
+      const attributedBeforeParts = Object.values(base.agents).reduce((s, a) => s + a.closed, 0);
+
+      const teepAdmins = await getTeepAdmins();
+      const teepIdSet  = new Set(teepAdmins.map((a: any) => String(a.id)));
+      const t1 = Date.now();
+      const { agents, complete } = await applyParts(
+        base, uA, uB, teepIdSet, { useCache: false, budgetMs: 42000, startedAt: started },
+      );
+      const partsMs = Date.now() - t1;
+      const finalClosed = Object.values(agents).reduce((s, a) => s + a.closed, 0);
+
+      return NextResponse.json({
+        date: dateStr,
+        baseMs,                       // time just to fetch+attribute the base searches
+        needsParts,                   // conversations that still need a parts fetch
+        attributedBeforeParts,
+        partsMs,                      // time spent in the (budgeted) parts pass
+        complete,                     // false => one fresh pass cannot finish this day
+        finalClosed,
+        diagnosis:
+          baseMs > 25000
+            ? "Base alone eats most of the 42s budget; parts get starved -> day never completes in one pass."
+            : (!complete
+                ? `Base is fine (${baseMs}ms) but ${needsParts} parts can't finish in one pass; needs cached resume.`
+                : "Day completes in a single cold pass; stall is elsewhere (frontend retry or cache write)."),
+        at: new Date().toISOString(),
+      });
+    }
+
     const startDate = searchParams.get("startDate") ?? "";
     const endDate   = searchParams.get("endDate")   ?? "";
 
