@@ -187,8 +187,18 @@ export default function TradingEthicsTab() {
         errorRetries.current = 0;
       } else {
         errorRetries.current = 0; // making progress, not erroring
+        // If the server reports the cache isn't persisting, retrying can never
+        // finish a wide range -- stop and show the fix instead of looping.
+        if (json.cacheHealthy === false) {
+          setNotice(
+            "The Supabase cache isn't saving results, so wide ranges can't finish. " +
+            "Check that SUPABASE_SERVICE_ROLE_KEY is set in Vercel and that teep_tables.sql has been run. " +
+            "(Single days still work.)"
+          );
+          return; // do not auto-reload into an endless loop
+        }
         setNotice(
-          `Building this range: ${json.ready ?? 0} of ${json.total ?? "?"} conversations attributed` +
+          `Building this range: ${json.ready ?? 0} of ${json.total ?? "?"} days computed` +
           (autoRef.current
             ? " -- continuing automatically..."
             : " -- click Reload to compute more.")
