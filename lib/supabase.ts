@@ -202,3 +202,18 @@ export async function writeTeepDay(day: string, payload: any): Promise<void> {
     });
   } catch { /* ignore */ }
 }
+
+// ── teep_report RPC: per-agent aggregates straight from the ETL tables ──────
+export type TeepReportRow = {
+  admin_id: string; name: string;
+  assigned: number; replied_to: number; closed: number; replies_sent: number;
+  frt_sum: number; frt_n: number; handling_sum: number; handling_n: number;
+  atf_sum: number; atf_n: number; sla_met: number; sla_total: number;
+};
+export async function teepReport(startIso: string, endIso: string): Promise<TeepReportRow[]> {
+  const c = client();
+  if (!c) throw new Error("Supabase not configured");
+  const { data, error } = await c.rpc("teep_report", { p_start: startIso, p_end: endIso });
+  if (error) throw new Error("teep_report rpc: " + error.message);
+  return (data ?? []) as TeepReportRow[];
+}
