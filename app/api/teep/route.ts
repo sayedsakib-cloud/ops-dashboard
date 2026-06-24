@@ -251,6 +251,54 @@ async function fetchRecoveryConvs(
   return merged;
 }
 
+// ── Reply-drift recovery search ────────────────────────────────────────────
+// Conversations whose last admin reply is AFTER the window (so the reply search
+// misses them) but which existed before the window ended -- i.e. threads still
+// being worked, where a reply may sit INSIDE the window. We confirm the in-window
+// comment from parts at aggregation. Bounded by a grace span after the window.
+async function fetchReplyRecoveryConvs(
+  token: string, teamIds: string[], uBefore: number, graceSecs: number,
+): Promise<any[]> {
+  const HDRS = {
+    Authorization: `Bearer ${token}`, "Content-Type": "application/json",
+    "Intercom-Version": "2.11",
+  };
+  const batches: string[][] = [];
+  for (let i = 0; i < teamIds.length; i += 5) batches.push(teamIds.slice(i, i + 5));
+
+  const per = await Promise.all(batches.map(async (bTeams) => {
+    const all: any[] = [];
+    let cursor: string | null = null;
+    for (let p = 0; p < 200; p++) {
+      const query = {
+        operator: "AND",
+        value: [
+          { field: "source.type", operator: "=", value: "email" },
+          { operator: "OR", value: bTeams.map(id => ({ field: "team_assignee_id", operator: "=", value: parseInt(id) })) },
+          { field: "statistics.last_admin_reply_at", operator: ">", value: uBefore },
+          { field: "statistics.last_admin_reply_at", operator: "<", value: uBefore + graceSecs },
+          { field: "created_at",                     operator: "<", value: uBefore },
+        ],
+      };
+      const pagination: any = { per_page: 150 };
+      if (cursor) pagination.starting_after = cursor;
+      const res  = await fetch(`${INTERCOM_API}/conversations/search`, {
+        method: "POST", headers: HDRS, body: JSON.stringify({ query, pagination }),
+      });
+      const data = await res.json();
+      if (data.errors) throw new Error("reply-recovery search: " + JSON.stringify(data.errors));
+      all.push(...(data.conversations ?? []));
+      cursor = data.pages?.next?.starting_after ?? null;
+      if (!cursor) break;
+    }
+    return all;
+  }));
+
+  const seen = new Set<string>(); const merged: any[] = [];
+  for (const b of per) for (const c of b) if (!seen.has(c.id)) { seen.add(c.id); merged.push(c); }
+  return merged;
+}
+
 // ── Fetch one conversation's parts -> closes + replies + customer flag ──────
 async function fetchConvParts(token: string, convId: string): Promise<ConvParts> {
   const r = await fetch(`${INTERCOM_API}/conversations/${convId}`, {
@@ -294,14 +342,15 @@ async function accurateDay(
   const token   = process.env.INTERCOM_ACCESS_TOKEN!;
   const crTeams = await getCRTeams();
   const teamIds = crTeams.map((t: any) => t.id);
-  const scanKey = "scan2_" + periodKey(uA, uB);
+  const scanKey = "scan3_" + periodKey(uA, uB);
 
   type Scan = {
     closedWIds: string[]; replyWIds: string[];
-    recoveryIds: string[]; recoveryError: string | null;
+    recoveryIds: string[]; replyDriftIds: string[]; recoveryError: string | null;
   };
   let scan = (await readTeepBase(scanKey)) as Scan | null;
   if (!scan) {
+    const REPLY_GRACE = 21 * 86400; // catch rework up to ~3 weeks past the window
     const [closedW, replyW] = await Promise.all([
       fetchConvsAllTeams(token, teamIds, "statistics.last_close_at",       uA, uB),
       fetchConvsAllTeams(token, teamIds, "statistics.last_admin_reply_at", uA, uB),
@@ -309,19 +358,25 @@ async function accurateDay(
     let recovery: any[] = []; let recoveryError: string | null = null;
     try { recovery = await fetchRecoveryConvs(token, teamIds, uB); }
     catch (e: any) { recoveryError = String(e?.message ?? e); }
+    let replyDrift: any[] = [];
+    try { replyDrift = await fetchReplyRecoveryConvs(token, teamIds, uB, REPLY_GRACE); }
+    catch (e: any) { if (!recoveryError) recoveryError = String(e?.message ?? e); }
     scan = {
-      closedWIds:  closedW.map((c: any) => String(c.id)),
-      replyWIds:   replyW.map((c: any) => String(c.id)),
-      recoveryIds: recovery.map((c: any) => String(c.id)),
+      closedWIds:    closedW.map((c: any) => String(c.id)),
+      replyWIds:     replyW.map((c: any) => String(c.id)),
+      recoveryIds:   recovery.map((c: any) => String(c.id)),
+      replyDriftIds: replyDrift.map((c: any) => String(c.id)),
       recoveryError,
     };
     await writeTeepBase(scanKey, scan);
   }
 
-  // Parts are needed for EVERY candidate -- closed attribution must come from the
-  // actual close event author (not the current assignee), and replies/replied-to
-  // from the actual comment author. So we fetch parts for the full union.
-  const need = [...new Set([...scan.closedWIds, ...scan.replyWIds, ...scan.recoveryIds])];
+  // Parts are needed for EVERY candidate -- closed attribution from the actual
+  // close-event author, replies/replied-to from the actual comment author. The
+  // reply-drift net recovers replies on threads that kept moving after the window.
+  const need = [...new Set([
+    ...scan.closedWIds, ...scan.replyWIds, ...scan.recoveryIds, ...(scan.replyDriftIds ?? []),
+  ])];
   const cached = await readTeepParts(need);
   const uncached = need.filter(id => !cached[id]);
   const BATCH = 25;
@@ -338,6 +393,7 @@ async function accurateDay(
 
   const closedWSet = new Set(scan.closedWIds);
   const recoSet    = new Set(scan.recoveryIds);
+  const closedScope = new Set<string>([...scan.closedWIds, ...scan.recoveryIds]);
   const inWin = (at: number) => at > uA && at < uB;
 
   const agentClosed:   Record<string, number> = {};
@@ -352,9 +408,10 @@ async function accurateDay(
     const winCloses   = p.closes.filter(e => inWin(e.at));
     const winComments = p.replies.filter(e => inWin(e.at));
 
-    // ── Closed: a conversation a teammate closed in-window, counted once and
-    //    credited to the actual LAST in-window teammate closer. ──────────────
-    if (winCloses.length > 0) {
+    // ── Closed: ONLY from the closed nets (last-close-in-window + reopen
+    //    recovery), so the reply-drift net never changes the closed count.
+    //    Credited to the actual LAST in-window teammate closer. ───────────────
+    if (closedScope.has(id) && winCloses.length > 0) {
       closedAllConvs.add(id);
       if (recoSet.has(id) && !closedWSet.has(id)) recoveryAdded++;
       const teepCloses = winCloses.filter(e => teepSet.has(e.adminId));
@@ -365,8 +422,8 @@ async function accurateDay(
       }
     }
 
-    // ── Replies: every in-window teammate comment on a customer conversation.
-    //    Replies Sent = per comment; Replied To = distinct conversations. ─────
+    // ── Replies: every in-window teammate comment on a customer conversation,
+    //    across the FULL set (incl. reply-drift recovery). ────────────────────
     if (p.hadCustomer && winComments.length > 0) {
       const repliersThisConv = new Set<string>();
       for (const cm of winComments) {
@@ -798,7 +855,7 @@ async function computeDayRaw(
   }
 
   const complete = acc.complete;
-  if (complete && useCache) await writeTeepDay("v3_" + day, agents); // freeze the finished day
+  if (complete && useCache) await writeTeepDay("v4_" + day, agents); // freeze the finished day
   return { agents, complete };
 }
 
@@ -821,13 +878,13 @@ async function getTeepByDays(
   // 1. Pull every already-cached complete day in one batch (cheap). v2 = new
   //    accurate-closed + replies engine; old unversioned rows are ignored.
   const cached: Record<string, RawPayload> = useCache
-    ? (await readTeepDays(days.map(d => "v3_" + d))) as Record<string, RawPayload>
+    ? (await readTeepDays(days.map(d => "v4_" + d))) as Record<string, RawPayload>
     : {};
 
   const merged: RawPayload = {};
   const missing: string[] = [];
   for (const d of days) {
-    if (cached["v3_" + d]) mergeRaw(merged, cached["v3_" + d]);
+    if (cached["v4_" + d]) mergeRaw(merged, cached["v4_" + d]);
     else missing.push(d);
   }
 
@@ -866,7 +923,7 @@ function isUsableResult(r: any): boolean {
 // ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
   const haveSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
-  const key = "v3_" + periodKey(uAfter, uBefore);
+  const key = "v4_" + periodKey(uAfter, uBefore);
 
   // 1. Finished range cached -> instant. Ignore empty/poisoned rows and recompute.
   if (haveSupabase) {
