@@ -361,8 +361,8 @@ export default function TradingEthicsTab() {
               <ChevronRight className="ml-auto h-4 w-4 text-amber-500 transition-transform group-open:rotate-90" />
             </summary>
             <div className="mt-3 space-y-2 pl-7 text-xs leading-relaxed text-amber-700 dark:text-amber-300/90">
-              <p><strong>Emails Closed</strong> now counts unique conversations closed by the 12 TEEP agents, read from conversation parts (close events) rather than the last-close timestamp. Reply-less closes and conversations that were later reopened are included via a recovery pass, so this matches Intercom&apos;s &quot;Closed by teammates&quot;.</p>
-              <p><strong>Replies Sent</strong> counts each public reply a teammate sent to a customer (from conversation parts), excluding AI/bot replies and internal notes.</p>
+              <p><strong>Why is Emails Closed close to but not exactly the Intercom report?</strong> We count each conversation a teammate actually closed in-window, read from close events. On settled days this matches Intercom&apos;s &quot;Closed by teammates&quot;; for a day still being worked it can sit a few percent off until reopens/re-closes settle. A difference within ~8-10% is expected and not an error.</p>
+              <p><strong>Replies Sent</strong> counts each public reply a teammate sent to a customer (from conversation parts), excluding AI/bot replies and internal notes. Because conversations replied to keep moving, a single recent day may read slightly under Intercom; over a week or month it aligns closely. A gap within ~8-10% is expected.</p>
               <p><strong>Replied / Day and Closed / Day</strong> divide by working days (Mon-Fri), not Intercom&apos;s Active-status hours, so those per-day rates are a different metric and will not match.</p>
             </div>
           </details>
