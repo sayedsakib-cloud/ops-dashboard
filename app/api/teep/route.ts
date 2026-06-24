@@ -7,6 +7,7 @@ import {
   readTeepBase,  writeTeepBase,
   readTeepConvs, writeTeepConvs,
   readTeepParts, writeTeepParts, type ConvParts,
+  teepReport,
   readTeepDays,  writeTeepDay,
   supabaseEnvPresent, supabaseHealthcheck, supabaseRoundtrip,
 } from "@/lib/supabase";
@@ -920,6 +921,29 @@ function isUsableResult(r: any): boolean {
   );
 }
 
+// ── Supabase-backed read path (ETL): one RPC, then the existing finalize() ──
+export async function getTeepFromSupabase(uAfter: number, uBefore: number): Promise<any> {
+  const startIso = new Date(uAfter * 1000).toISOString();
+  const endIso   = new Date(uBefore * 1000).toISOString();
+  const rows = await teepReport(startIso, endIso);
+
+  const raw: RawPayload = {};
+  for (const r of rows) {
+    raw[r.admin_id] = {
+      name:        decodeName(r.name ?? r.admin_id),
+      assigned:    r.assigned     ?? 0,
+      repliedTo:   r.replied_to   ?? 0,
+      closed:      r.closed       ?? 0,
+      repliesSent: r.replies_sent ?? 0,
+      frtSum:      r.frt_sum      ?? 0, frtN:      r.frt_n      ?? 0,
+      handlingSum: r.handling_sum ?? 0, handlingN: r.handling_n ?? 0,
+      atfSum:      r.atf_sum      ?? 0, atfN:      r.atf_n      ?? 0,
+      slaMet:      r.sla_met      ?? 0, slaTotal:  r.sla_total  ?? 0,
+    };
+  }
+  return finalize(raw, uAfter, uBefore);
+}
+
 // ── Cache-first entry point (exported for the cron warmer) ─────────────────
 export async function getTeepCached(uAfter: number, uBefore: number): Promise<any> {
   const haveSupabase = !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
@@ -1342,7 +1366,7 @@ export async function GET(req: Request) {
     const uAfter  = startDate ? toUnixStart(startDate) : yest.uAfter;
     const uBefore = endDate   ? toUnixEnd(endDate)     : yest.uBefore;
 
-    const data = await getTeepCached(uAfter, uBefore);
+    const data = await getTeepFromSupabase(uAfter, uBefore);
     return NextResponse.json(data);
 
   } catch (err) {
