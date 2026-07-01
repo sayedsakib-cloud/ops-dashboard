@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "next-themes";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, LabelList,
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList,
   CartesianGrid, Legend,
 } from "recharts";
 import { ArrowRight, Loader2, Calendar as CalIcon } from "lucide-react";
@@ -46,16 +46,18 @@ type AlignmentPayload = {
   slCR: AlignRow[];
 };
 
-type ChartSeries = Array<{ name: string; value: number; key: string }>;
+type SeriesMeta = { key: string; name: string };
+type DayRow = { date: string; [k: string]: number | string };
+type BdSlChart = { series: SeriesMeta[]; rows: DayRow[] };
 type BdSlPayload = {
-  date: string;
+  dateLabel: string;
   charts: {
-    kyc: { date: string; series: ChartSeries };
-    payout: { date: string; series: ChartSeries };
-    intercom: { date: string; series: ChartSeries };
-    clickup: { date: string; series: ChartSeries };
-    instantKyc: { date: string; series: ChartSeries };
-    crEmail: { date: string; series: ChartSeries };
+    kyc: BdSlChart;
+    payout: BdSlChart;
+    intercom: BdSlChart;
+    clickup: BdSlChart;
+    instantKyc: BdSlChart;
+    crEmail: BdSlChart;
   };
 };
 
@@ -545,9 +547,10 @@ function BdSlSection({ range }: { range: DateRange }) {
       setLoading(true);
       setError(null);
       try {
-        // BD-SL is a single-day snapshot; use the range end date when set.
+        // BD-SL now renders one bar-group per day across the selected range.
         const p = new URLSearchParams();
-        if (range.to) p.set("date", range.to);
+        if (range.from) p.set("from", range.from);
+        if (range.to) p.set("to", range.to);
         const url = "/api/daily-huddle/bd-sl" + (p.toString() ? "?" + p.toString() : "");
         const r = await fetch(url);
         if (!r.ok) throw new Error("Failed to load");
@@ -560,17 +563,17 @@ function BdSlSection({ range }: { range: DateRange }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [range.to]);
+  }, [range.from, range.to]);
 
   return (
     <div className="space-y-4">
       <Card className="overflow-hidden border bg-card">
         <CardContent className="flex items-center justify-between p-4">
           <h2 className="text-xl font-bold tracking-tight text-foreground">BD-SL-Automation Contribution</h2>
-          {data?.date ? (
+          {data?.dateLabel ? (
             <Badge variant="outline" className="px-3 py-1.5 text-xs font-medium">
               <CalIcon className="mr-1.5 inline h-3 w-3" />
-              {data.date}
+              {data.dateLabel}
             </Badge>
           ) : null}
         </CardContent>
@@ -585,15 +588,15 @@ function BdSlSection({ range }: { range: DateRange }) {
       ) : data ? (
         <>
           <div className="grid gap-4 lg:grid-cols-2">
-            <BdSlBarChart title="KYC" data={data.charts.kyc} dateLabel={data.charts.kyc.date} />
-            <BdSlBarChart title="Payout" data={data.charts.payout} dateLabel={data.charts.payout.date} />
-            <BdSlBarChart title="Intercom Ticket Solved" data={data.charts.intercom} dateLabel={data.charts.intercom.date} />
-            <BdSlBarChart title="Click Up Issues solved" data={data.charts.clickup} dateLabel={data.charts.clickup.date} />
+            <BdSlBarChart title="KYC" chart={data.charts.kyc} />
+            <BdSlBarChart title="Payout" chart={data.charts.payout} />
+            <BdSlBarChart title="Intercom Ticket Solved" chart={data.charts.intercom} />
+            <BdSlBarChart title="Click Up Issues solved" chart={data.charts.clickup} />
           </div>
           <Separator className="my-2" />
           <div className="grid gap-4 lg:grid-cols-2">
-            <BdSlBarChart title="Instant KYC Checked" data={data.charts.instantKyc} dateLabel={data.charts.instantKyc.date} />
-            <BdSlBarVertical title="CR Email Contribution" data={data.charts.crEmail} dateLabel={data.charts.crEmail.date} />
+            <BdSlBarChart title="Instant KYC Checked" chart={data.charts.instantKyc} />
+            <BdSlBarVertical title="CR Email Contribution" chart={data.charts.crEmail} />
           </div>
         </>
       ) : null}
@@ -608,12 +611,15 @@ const CHART_COLORS = {
   auto: "#E91E63", // magenta/pink
 };
 
-function BdSlBarChart({ title, data, dateLabel }: { title: string; data: { series: ChartSeries }; dateLabel: string }) {
+function BdSlBarChart({ title, chart }: { title: string; chart: BdSlChart }) {
   const { resolvedTheme } = useTheme();
   const axisColor = resolvedTheme === "dark" ? "#94a3b8" : "#475569";
   const gridColor = resolvedTheme === "dark" ? "rgba(148,163,184,0.15)" : "rgba(148,163,184,0.3)";
 
   const colorFor = (key: string) => key === "bd" ? CHART_COLORS.bd : key === "sl" ? CHART_COLORS.sl : CHART_COLORS.auto;
+  const rowCount = Math.max(1, chart.rows.length);
+  // Height scales with number of days so bars stay readable across a range.
+  const height = Math.max(200, rowCount * chart.series.length * 26 + 48);
 
   return (
     <Card className="overflow-hidden border bg-card">
@@ -623,54 +629,57 @@ function BdSlBarChart({ title, data, dateLabel }: { title: string; data: { serie
       <CardContent className="p-4">
         {/* Legend */}
         <div className="mb-3 flex flex-wrap gap-3 text-xs">
-          {data.series.map(s => (
+          {chart.series.map(s => (
             <div key={s.key} className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-sm" style={{ background: colorFor(s.key) }} />
               <span className="text-muted-foreground">{s.name}</span>
             </div>
           ))}
         </div>
-        <div style={{ width: "100%", height: 200 }}>
-          <ResponsiveContainer>
-            <BarChart
-              layout="vertical"
-              data={[{ date: dateLabel, ...Object.fromEntries(data.series.map(s => [s.key, s.value])) }]}
-              margin={{ top: 8, right: 32, bottom: 8, left: 0 }}
-              barCategoryGap="20%"
-            >
-              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" horizontal={false} />
-              <XAxis type="number" stroke={axisColor} fontSize={11} />
-              <YAxis dataKey="date" type="category" stroke={axisColor} fontSize={11} width={70} />
-              <Tooltip
-                cursor={{ fill: resolvedTheme === "dark" ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.15)" }}
-                contentStyle={{
-                  backgroundColor: resolvedTheme === "dark" ? "rgb(30 41 59)" : "#ffffff",
-                  border: `1px solid ${resolvedTheme === "dark" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.3)"}`,
-                  borderRadius: 8, fontSize: 12,
-                }}
-                labelStyle={{ color: resolvedTheme === "dark" ? "#f1f5f9" : "#111827", fontWeight: 600 }}
-                itemStyle={{ color: resolvedTheme === "dark" ? "#e2e8f0" : "#111827" }}
-              />
-              {data.series.map(s => (
-                <Bar key={s.key} dataKey={s.key} fill={colorFor(s.key)} radius={[0, 2, 2, 0]}>
-                  <LabelList dataKey={s.key} position="insideRight" fill="#ffffff" fontSize={12} fontWeight={600} />
-                </Bar>
-              ))}
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
+        {chart.rows.length === 0 ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">No data for this range.</p>
+        ) : (
+          <div style={{ width: "100%", height }}>
+            <ResponsiveContainer>
+              <BarChart
+                layout="vertical"
+                data={chart.rows}
+                margin={{ top: 8, right: 40, bottom: 8, left: 0 }}
+                barCategoryGap="20%"
+              >
+                <CartesianGrid stroke={gridColor} strokeDasharray="3 3" horizontal={false} />
+                <XAxis type="number" stroke={axisColor} fontSize={11} />
+                <YAxis dataKey="date" type="category" stroke={axisColor} fontSize={11} width={72} />
+                <Tooltip
+                  cursor={{ fill: resolvedTheme === "dark" ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.15)" }}
+                  contentStyle={{
+                    backgroundColor: resolvedTheme === "dark" ? "rgb(30 41 59)" : "#ffffff",
+                    border: `1px solid ${resolvedTheme === "dark" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.3)"}`,
+                    borderRadius: 8, fontSize: 12,
+                  }}
+                  labelStyle={{ color: resolvedTheme === "dark" ? "#f1f5f9" : "#111827", fontWeight: 600 }}
+                  itemStyle={{ color: resolvedTheme === "dark" ? "#e2e8f0" : "#111827" }}
+                />
+                {chart.series.map(s => (
+                  <Bar key={s.key} dataKey={s.key} name={s.name} fill={colorFor(s.key)} radius={[0, 2, 2, 0]}>
+                    <LabelList dataKey={s.key} position="right" fill={axisColor} fontSize={11} fontWeight={600} />
+                  </Bar>
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
 }
 
-function BdSlBarVertical({ title, data, dateLabel }: { title: string; data: { series: ChartSeries }; dateLabel: string }) {
+function BdSlBarVertical({ title, chart }: { title: string; chart: BdSlChart }) {
   const { resolvedTheme } = useTheme();
   const axisColor = resolvedTheme === "dark" ? "#94a3b8" : "#475569";
   const gridColor = resolvedTheme === "dark" ? "rgba(148,163,184,0.15)" : "rgba(148,163,184,0.3)";
 
   const colorFor = (key: string) => key === "bd" ? CHART_COLORS.bd : key === "sl" ? CHART_COLORS.sl : CHART_COLORS.auto;
-  const chartData = data.series.map(s => ({ name: s.name, key: s.key, value: s.value }));
 
   return (
     <Card className="overflow-hidden border bg-card">
@@ -679,37 +688,41 @@ function BdSlBarVertical({ title, data, dateLabel }: { title: string; data: { se
       </CardHeader>
       <CardContent className="p-4">
         <div className="mb-3 flex flex-wrap gap-3 text-xs">
-          {data.series.map(s => (
+          {chart.series.map(s => (
             <div key={s.key} className="flex items-center gap-1.5">
               <span className="inline-block h-3 w-3 rounded-sm" style={{ background: colorFor(s.key) }} />
               <span className="text-muted-foreground">{s.name}</span>
             </div>
           ))}
         </div>
-        <div style={{ width: "100%", height: 240 }}>
-          <ResponsiveContainer>
-            <BarChart data={chartData} margin={{ top: 16, right: 16, bottom: 28, left: 0 }}>
-              <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
-              <XAxis dataKey="name" stroke={axisColor} fontSize={11} tick={false} />
-              <YAxis stroke={axisColor} fontSize={11} />
-              <Tooltip
-                cursor={{ fill: resolvedTheme === "dark" ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.15)" }}
-                contentStyle={{
-                  backgroundColor: resolvedTheme === "dark" ? "rgb(30 41 59)" : "#ffffff",
-                  border: `1px solid ${resolvedTheme === "dark" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.3)"}`,
-                  borderRadius: 8, fontSize: 12,
-                }}
-                labelStyle={{ color: resolvedTheme === "dark" ? "#f1f5f9" : "#111827", fontWeight: 600 }}
-                itemStyle={{ color: resolvedTheme === "dark" ? "#e2e8f0" : "#111827" }}
-              />
-              <Bar dataKey="value" radius={[6, 6, 0, 0]}>
-                {chartData.map((d, i) => <Cell key={i} fill={colorFor(d.key)} />)}
-                <LabelList dataKey="value" position="insideTop" fill="#ffffff" fontSize={12} fontWeight={600} offset={8} />
-              </Bar>
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-        <p className="mt-2 text-center text-xs text-muted-foreground">{dateLabel}</p>
+        {chart.rows.length === 0 ? (
+          <p className="py-12 text-center text-sm text-muted-foreground">No data for this range.</p>
+        ) : (
+          <div style={{ width: "100%", height: 240 }}>
+            <ResponsiveContainer>
+              <BarChart data={chart.rows} margin={{ top: 16, right: 16, bottom: 8, left: 0 }} barCategoryGap="20%">
+                <CartesianGrid stroke={gridColor} strokeDasharray="3 3" vertical={false} />
+                <XAxis dataKey="date" stroke={axisColor} fontSize={11} />
+                <YAxis stroke={axisColor} fontSize={11} />
+                <Tooltip
+                  cursor={{ fill: resolvedTheme === "dark" ? "rgba(148,163,184,0.08)" : "rgba(148,163,184,0.15)" }}
+                  contentStyle={{
+                    backgroundColor: resolvedTheme === "dark" ? "rgb(30 41 59)" : "#ffffff",
+                    border: `1px solid ${resolvedTheme === "dark" ? "rgba(148,163,184,0.2)" : "rgba(148,163,184,0.3)"}`,
+                    borderRadius: 8, fontSize: 12,
+                  }}
+                  labelStyle={{ color: resolvedTheme === "dark" ? "#f1f5f9" : "#111827", fontWeight: 600 }}
+                  itemStyle={{ color: resolvedTheme === "dark" ? "#e2e8f0" : "#111827" }}
+                />
+                {chart.series.map(s => (
+                  <Bar key={s.key} dataKey={s.key} name={s.name} fill={colorFor(s.key)} radius={[4, 4, 0, 0]}>
+                    <LabelList dataKey={s.key} position="top" fill={axisColor} fontSize={11} fontWeight={600} />
+                  </Bar>
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
