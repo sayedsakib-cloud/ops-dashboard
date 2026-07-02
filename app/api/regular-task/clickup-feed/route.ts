@@ -8,7 +8,7 @@ export const dynamic = "force-dynamic";
 const CLICKUP_API = "https://api.clickup.com/api/v3";
 const WORKSPACE_ID = process.env.CLICKUP_WORKSPACE_ID ?? "3480971";
 const CHANNEL_ID   = process.env.CLICKUP_CHANNEL_ID ?? "3a7cb-362458";
-const TOKEN        = process.env.CLICKUP_API_TOKEN ?? "";
+const TOKEN        = process.env.CLICKUP_API_TOKEN ?? "pk_48287545_6RHQ5A3CZ00GEB3Y9XWK4N4CMOK4L0HH";
 
 type FeedMessage = {
   id: string;
