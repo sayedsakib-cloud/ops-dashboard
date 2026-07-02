@@ -8,6 +8,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import TeammatePerformance from "@/components/dashboard/tabs/TeammatePerformance";
+
+const SUBTAB_CLS =
+  "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 type AgentRow = {
@@ -260,6 +265,12 @@ export default function TradingEthicsTab() {
   const TIP_CLOSED_HR  = "Conversations closed divided by number of working days (Mon-Fri) in the period. NOT the same as Intercom's Conv. Closed / Active Hr which uses actual logged-in status time.";
 
   return (
+    <Tabs defaultValue="overview" className="space-y-4">
+      <TabsList className="inline-flex h-10 items-center justify-center rounded-md bg-muted p-1 text-muted-foreground">
+        <TabsTrigger value="overview" className={SUBTAB_CLS}>Overview</TabsTrigger>
+        <TabsTrigger value="teammate" className={SUBTAB_CLS}>Teammate Performance</TabsTrigger>
+      </TabsList>
+      <TabsContent value="overview" className="mt-4 focus-visible:outline-none">
     <div className="space-y-5">
       {/* Header */}
       <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-end sm:justify-between">
@@ -465,5 +476,10 @@ export default function TradingEthicsTab() {
         </div>
       ) : null}
     </div>
+      </TabsContent>
+      <TabsContent value="teammate" className="mt-4 focus-visible:outline-none">
+        <TeammatePerformance />
+      </TabsContent>
+    </Tabs>
   );
 }
