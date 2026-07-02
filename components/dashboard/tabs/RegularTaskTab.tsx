@@ -16,20 +16,57 @@ type FeedMessage = {
 const TAB_TRIGGER_CLS =
   "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm";
 
-// ---- safe minimal markdown -> html (escape first, then a small subset) ----
-function renderContent(src: string): string {
-  let s = src.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// ---- safe markdown -> html: escape everything, then a controlled subset ----
+const LINK_CLS = "text-sky-600 underline decoration-sky-400/50 underline-offset-2 dark:text-sky-400";
+
+function inlineMd(raw: string): string {
+  let s = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   s = s.replace(/`([^`]+)`/g, '<code class="rounded bg-black/10 px-1 py-0.5 text-[0.85em] dark:bg-white/10">$1</code>');
   s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-  s = s.replace(/(^|[\s(])\*([^*\n]+)\*/g, "$1<em>$2</em>");
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*(?!\*)/g, "$1<em>$2</em>");
   s = s.replace(/(^|[\s(])_([^_\n]+)_/g, "$1<em>$2</em>");
   s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-sky-600 underline decoration-sky-400/50 underline-offset-2 dark:text-sky-400">$1</a>');
+    `<a href="$2" target="_blank" rel="noopener noreferrer" class="${LINK_CLS}">$1</a>`);
   s = s.replace(/(^|[\s])(https?:\/\/[^\s<]+)/g,
-    '$1<a href="$2" target="_blank" rel="noopener noreferrer" class="text-sky-600 underline decoration-sky-400/50 underline-offset-2 dark:text-sky-400">$2</a>');
-  s = s.replace(/^[-*]\s+(.*)$/gm, '<span class="flex gap-2"><span class="opacity-60">\u2022</span><span>$1</span></span>');
-  s = s.replace(/\n/g, "<br/>");
+    `$1<a href="$2" target="_blank" rel="noopener noreferrer" class="${LINK_CLS}">$2</a>`);
   return s;
+}
+
+function renderContent(src: string): string {
+  const lines = src.replace(/\r\n/g, "\n").split("\n");
+  const out: string[] = [];
+  let inList = false;
+  let pendingGap = false; // a blank line was seen; add top margin to the next block
+  const closeList = () => { if (inList) { out.push("</ul>"); inList = false; } };
+  const gap = () => (pendingGap ? " mt-2" : "");
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/\s+$/, "");
+    const t = line.trim();
+
+    if (!t) { closeList(); pendingGap = true; continue; }
+    if (/^\*{1,2}$/.test(t)) { continue; }                 // orphan * / ** markers
+    if (/^(\*{3,}|-{3,}|_{3,})$/.test(t)) {                 // horizontal rule
+      closeList(); out.push('<hr class="my-3 border-black/10 dark:border-white/15"/>'); pendingGap = false; continue;
+    }
+    const h = /^(#{1,6})\s+(.*)$/.exec(t);                  // headings
+    if (h) {
+      closeList();
+      const lvl = h[1].length;
+      const cls = lvl <= 1 ? "text-lg font-bold" : lvl === 2 ? "text-base font-bold" : "text-sm font-semibold";
+      out.push(`<p class="${cls}${gap()} mb-1">${inlineMd(h[2])}</p>`); pendingGap = false; continue;
+    }
+    const b = /^[-*]\s+(.*)$/.exec(t);                      // bullet items
+    if (b) {
+      if (!inList) { out.push(`<ul class="${gap()} space-y-1 pl-1">`); inList = true; }
+      out.push(`<li class="flex gap-2"><span class="mt-0.5 opacity-50">\u2022</span><span>${inlineMd(b[1])}</span></li>`);
+      pendingGap = false; continue;
+    }
+    closeList();                                            // paragraph
+    out.push(`<p class="${gap()}">${inlineMd(t)}</p>`); pendingGap = false;
+  }
+  closeList();
+  return out.join("");
 }
 
 function dayLabel(ms: number): string {
@@ -130,7 +167,7 @@ function OpsProcessFeed() {
                     </div>
                   </div>
                   <div
-                    className="whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground/90 [&_a]:break-all"
+                    className="space-y-1 break-words text-sm leading-relaxed text-foreground/90 [&_a]:break-all"
                     dangerouslySetInnerHTML={{ __html: renderContent(m.content) }}
                   />
                 </div>
