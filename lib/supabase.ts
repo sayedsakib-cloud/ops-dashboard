@@ -217,3 +217,24 @@ export async function teepReport(startIso: string, endIso: string): Promise<Teep
   if (error) throw new Error("teep_report rpc: " + error.message);
   return (data ?? []) as TeepReportRow[];
 }
+
+// ── Teammate Performance: hourly (dow x hour) grid + agent list ────────────
+export type HourlyCell = {
+  dow: number; hour: number;
+  closed_count: number; replies_count: number;
+  frt_median: number | null; close_median: number | null;
+};
+export async function teepHourly(startIso: string, endIso: string, agent?: string | null): Promise<HourlyCell[]> {
+  const c = client();
+  if (!c) throw new Error("Supabase not configured");
+  const { data, error } = await c.rpc("teep_hourly", { p_start: startIso, p_end: endIso, p_agent: agent ?? null });
+  if (error) throw new Error("teep_hourly rpc: " + error.message);
+  return (data ?? []) as HourlyCell[];
+}
+export async function teepAgents(): Promise<{ admin_id: string; name: string }[]> {
+  const c = client();
+  if (!c) throw new Error("Supabase not configured");
+  const { data, error } = await c.from("teep_teammates").select("admin_id,name").eq("is_teep", true);
+  if (error) throw new Error("teep_teammates select: " + error.message);
+  return (data ?? []) as { admin_id: string; name: string }[];
+}
