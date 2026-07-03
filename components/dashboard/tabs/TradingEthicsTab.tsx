@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import TeammatePerformance from "@/components/dashboard/tabs/TeammatePerformance";
+import FreshnessBadge from "@/components/dashboard/FreshnessBadge";
 
 const SUBTAB_CLS =
   "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm";
@@ -277,6 +278,7 @@ export default function TradingEthicsTab() {
         <div>
           <h1 className="text-xl font-bold">Trading Ethics Email Performance</h1>
           <p className="mt-0.5 text-xs text-muted-foreground">Channel: Email - Team: All CR inboxes - Timezone: GMT+6</p>
+          <div className="mt-2"><FreshnessBadge /></div>
         </div>
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1">
