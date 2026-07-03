@@ -238,3 +238,16 @@ export async function teepAgents(): Promise<{ admin_id: string; name: string }[]
   if (error) throw new Error("teep_teammates select: " + error.message);
   return (data ?? []) as { admin_id: string; name: string }[];
 }
+
+// ── TEEP sync freshness: when did the delta cron last run? ─────────────────
+export async function teepLastSync(): Promise<{ updatedAt: string | null }> {
+  const c = client();
+  if (!c) throw new Error("Supabase not configured");
+  const { data, error } = await c
+    .from("teep_sync_state")
+    .select("updated_at")
+    .eq("key", "cursor")
+    .maybeSingle();
+  if (error) throw new Error("teep_sync_state select: " + error.message);
+  return { updatedAt: (data as any)?.updated_at ?? null };
+}
