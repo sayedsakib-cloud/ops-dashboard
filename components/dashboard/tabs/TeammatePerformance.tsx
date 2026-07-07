@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import DateRangeControls from "@/components/dashboard/DateRangeControls";
 
 type HourlyCell = {
   dow: number; hour: number;
@@ -142,35 +143,23 @@ export default function TeammatePerformance() {
       {/* Controls */}
       <Card className="border bg-card">
         <CardContent className="flex flex-wrap items-end gap-3 p-4">
-          <div className="space-y-1">
-            <Label className="text-xs">From</Label>
-            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-9 w-40" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">To</Label>
-            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="h-9 w-40" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs">Agent</Label>
-            <select
-              value={agent}
-              onChange={e => { setAgent(e.target.value); load(from, to, e.target.value); }}
-              className="h-9 w-52 rounded-md border border-input bg-background px-2 text-sm"
-            >
-              <option value="">All agents</option>
-              {data?.agents.map(a => <option key={a.admin_id} value={a.admin_id}>{a.name}</option>)}
-            </select>
-          </div>
-          <Button onClick={() => load(from, to, agent)} disabled={loading} className="h-9">
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Apply"}
-          </Button>
-          {rangeLabel && (
-            <span className="ml-auto text-xs text-muted-foreground">
-              Showing <b>{agentName ?? "all agents"}</b> · {rangeLabel} · times in Asia/Dhaka
+          <DateRangeControls from={from} to={to} onFrom={setFrom} onTo={setTo} onApply={() => load(from, to, agent)} loading={loading}>
+            <div className="space-y-1">
+              <Label className="text-xs">Agent</Label>
+              <select value={agent} onChange={e => { setAgent(e.target.value); load(from, to, e.target.value); }}
+                className="h-9 w-52 rounded-md border border-input bg-background px-2 text-sm">
+                <option value="">All agents</option>
+                {data?.agents.map(a => <option key={a.admin_id} value={a.admin_id}>{a.name}</option>)}
+              </select>
+            </div>
+           </DateRangeControls>
+            {rangeLabel && (
+              <span className="ml-auto text-xs text-muted-foreground">
+                Showing <b>{agentName ?? "all agents"}</b> · {rangeLabel} · times in Asia/Dhaka
             </span>
-          )}
-        </CardContent>
-      </Card>
+            )}
+          </CardContent>
+        </Card>
 
       {loading ? (
         <div className="space-y-4">
