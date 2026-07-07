@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import DOMPurify from "dompurify";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 
 type FeedMessage = {
@@ -168,7 +169,7 @@ function OpsProcessFeed() {
                   </div>
                   <div
                     className="space-y-1 break-words text-sm leading-relaxed text-foreground/90 [&_a]:break-all"
-                    dangerouslySetInnerHTML={{ __html: renderContent(m.content) }}
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(renderContent(m.content), { ADD_ATTR: ["target", "rel"] }) }}
                   />
                 </div>
               ))}
