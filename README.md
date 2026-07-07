@@ -1,36 +1,37 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ops-dashboard
 
-## Getting Started
+Internal operations dashboard for FundedNext CR / BizOps — agent KPIs, ticket &
+email performance, task tracking, and automation contribution — in one place.
 
-First, run the development server:
+**Stack:** Next.js (App Router, React 19) · Tailwind + shadcn/ui · NextAuth
+(Google OAuth, @nextventures.io only) · Supabase · Vercel. Data comes from
+Supabase, Intercom, Google Sheets, and ClickUp.
 
+## Quick start
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+git clone <repo-url> && cd ops-dashboard
+npm install
+cp .env.example .env.local   # then fill in the values
+npm run dev                  # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Verify before pushing
+```bash
+npx tsc --noEmit             # type-check
+npx next build               # full production build
+```
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Deploy
+Push to `main` → Vercel auto-deploys. Set the same env vars from `.env.example`
+in Vercel → Settings → Environment Variables.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Documentation
+- **[MAINTENANCE.md](./MAINTENANCE.md)** — architecture, the TEEP data pipeline,
+  sync commands, validation queries, and the runbook.
+- **[AGENTS.md](./AGENTS.md)** — conventions & gotchas for anyone (or any AI tool)
+  editing this repo. **Read this before making changes.**
+- **[.env.example](./.env.example)** — required environment variables.
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on VercelApp
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Tabs
+Daily Huddle · KPI · Regular Task (incl. ClickUp Process Updates) · Tickets ·
+Trading Ethics Email Performance (incl. Teammate Performance heatmaps).
