@@ -32,17 +32,17 @@ function fmtDur(s: number | null): string {
 }
 
 function colorFor(v: number | null, max: number, kind: "count" | "duration"): string {
-  if (v == null) return "transparent";
+  if (v == null || v <= 0) return "transparent";
+  const t = max > 0 ? Math.min(1, v / max) : 0;
   if (kind === "count") {
-    if (v === 0) return "transparent";
-    const t = max > 0 ? Math.min(1, v / max) : 0;
     return `rgba(37, 99, 235, ${0.12 + 0.85 * t})`; // blue: darker = more
   }
-  // duration: green (fast) -> amber -> red (slow)
-  const t = max > 0 ? Math.min(1, v / max) : 0;
-  const r = t < 0.5 ? Math.round(2 * t * 235) : 235;
-  const g = t < 0.5 ? 190 : Math.round(190 * (1 - (t - 0.5) * 2));
-  return `rgba(${r}, ${g}, 70, 0.9)`;
+  // duration: single warm ramp, pale amber (fast) -> deep red (slow).
+  // colorblind-safe — magnitude reads from lightness, not a red/green hue switch.
+  const r = Math.round(250 + (180 - 250) * t);
+  const g = Math.round(240 + (30 - 240) * t);
+  const b = Math.round(180 + (30 - 180) * t);
+  return `rgba(${r}, ${g}, ${b}, ${0.35 + 0.6 * t})`;
 }
 
 function Heatmap({
