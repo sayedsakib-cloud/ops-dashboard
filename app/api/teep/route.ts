@@ -475,7 +475,7 @@ async function fetchAllCloseEvents(token: string, convId: string): Promise<Close
 // ── Per-agent accumulator ─────────────────────────────────────────────────
 type RawAcc = {
   name: string;
-  assigned: number; repliedTo: number; closed: number; closedByAgent: number; repliesSent: number;
+  assigned: number; repliedTo: number; closed: number; closedByAgent?: number; repliesSent: number;
   frtSum: number; frtN: number; handlingSum: number; handlingN: number;
   atfSum: number; atfN: number; slaMet: number; slaTotal: number;
 };
@@ -669,7 +669,7 @@ function finalize(raw: RawPayload, uAfter: number, uBefore: number): any {
       assigned:       a.assigned,
       repliedTo:      a.repliedTo,
       closed:         a.closed,
-      closedByAgent: a.closedByAgent ?? 0,
+      closedByAgent:  a.closedByAgent ?? 0,
       repliesSent:    a.repliesSent,
       avgFrtFmt:      a.frtN > 0       ? fmt(a.frtSum / a.frtN)           : "--",
       avgHandlingFmt: a.handlingN > 0  ? fmt(a.handlingSum / a.handlingN) : "--",
