@@ -209,6 +209,7 @@ export type TeepReportRow = {
   assigned: number; replied_to: number; closed: number; replies_sent: number;
   frt_sum: number; frt_n: number; handling_sum: number; handling_n: number;
   atf_sum: number; atf_n: number; sla_met: number; sla_total: number;
+  closed_by_agent: number;
 };
 export async function teepReport(startIso: string, endIso: string): Promise<TeepReportRow[]> {
   const c = client();
