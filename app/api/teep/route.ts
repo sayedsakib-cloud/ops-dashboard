@@ -934,6 +934,7 @@ export async function getTeepFromSupabase(uAfter: number, uBefore: number): Prom
       assigned:    r.assigned     ?? 0,
       repliedTo:   r.replied_to   ?? 0,
       closed:      r.closed       ?? 0,
+      closedByAgent: r.closed_by_agent ?? 0,
       repliesSent: r.replies_sent ?? 0,
       frtSum:      r.frt_sum      ?? 0, frtN:      r.frt_n      ?? 0,
       handlingSum: r.handling_sum ?? 0, handlingN: r.handling_n ?? 0,
