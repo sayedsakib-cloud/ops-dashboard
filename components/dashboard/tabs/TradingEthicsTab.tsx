@@ -19,6 +19,7 @@ const SUBTAB_CLS =
 type AgentRow = {
   name: string;
   assigned: number; repliedTo: number; closed: number; repliesSent: number;
+  closedByAgent?: number;
   avgFrtFmt: string; avgHandlingFmt: string; avgAtfFmt: string;
   repliedPerHour: string; closedPerHour: string;
   slaMet: number; slaTotal: number; slaRate: number;
@@ -259,6 +260,7 @@ export default function TradingEthicsTab() {
   const s = data?.summary;
 
   const TIP_CLOSED     = "Unique conversations closed by the 12 TEEP agents in the period, counted once each. Includes reply-less closes (duplicates / no-reply-needed) and conversations later reopened, recovered via conversation parts. Matches Intercom's 'Closed by teammates'.";
+  const TIP_CLOSED_AGENT = "Conversations this agent closed (Intercom's 'Closed by teammates', per agent). A conversation reopened and closed by more than one person is credited to each closer, so this column can add up to more than the total — the total counts each conversation once.";
   const TIP_REPLIES    = "Total replies (public comments) sent by TEEP agents to customers in the period, counted per reply from conversation parts. Excludes AI/bot replies and internal notes. Matches Intercom's 'Replies sent'.";
   const TIP_FRT        = "Time from conversation creation to first human agent reply (time_to_admin_reply). Attributed to the primary handler only.";
   const TIP_HANDLING   = "time_to_first_close minus time_to_admin_reply (first reply to close). Intercom measures from agent assignment to close using parts-level data not available via the public API.";
@@ -395,6 +397,7 @@ export default function TradingEthicsTab() {
                     "Conversations Replied To",
                     { label: "Replies Sent", tip: TIP_REPLIES },
                     { label: "Closed Conversations", tip: TIP_CLOSED },
+                    { label: "Closed Conversations", tip: TIP_CLOSED_AGENT },
                   ]} />
                 </TableHeader>
                 <TableBody>
@@ -417,6 +420,7 @@ export default function TradingEthicsTab() {
                       <TableCell className="text-center font-medium text-muted-foreground">{row.repliedTo}</TableCell>
                       <TableCell className="text-center font-semibold text-indigo-600 dark:text-indigo-400">{row.repliesSent ?? 0}</TableCell>
                       <TableCell className="text-center font-bold">{row.closed}</TableCell>
+                      <TableCell className="text-center font-bold">{row.closedByAgent ?? row.closed}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
