@@ -41,7 +41,7 @@ export function parseSheetDate(raw: string): Date | null {
     } else if (b > 12) {     // b can only be a day -> MM/DD/YYYY
       day = b; month = a;
     } else {                 // ambiguous (both <= 12) -> assume DD/MM/YYYY (sheet uses day-first)
-      day = a; month = b;
+      month = a; day = b;
     }
     if (month >= 1 && month <= 12 && day >= 1 && day <= 31)
       return new Date(Date.UTC(year, month - 1, day));
