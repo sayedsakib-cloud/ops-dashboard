@@ -63,7 +63,7 @@ export default function DateFilter({ dateRange, onDateRangeChange, availableWeek
               <button
                 key={idx}
                 onClick={() => handleWeekSelect(week)}
-                className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:bg-sky-600 hover:text-white transition-colors"
+                className="rounded-lg bg-slate-800 px-3 py-2 text-xs text-slate-300 hover:bg-primary hover:text-primary-foreground transition-colors"
               >
                 {new Date(week.start).toLocaleDateString("en-US", {
                   month: "short",

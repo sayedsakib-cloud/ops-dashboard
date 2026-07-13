@@ -192,7 +192,7 @@ export default function TicketsTab() {
   const agentRows  = (cur.data?.byAgent ?? []).filter(a => a.name !== "Unassigned");
   const unassigned = (cur.data?.byAgent ?? []).find(a => a.name === "Unassigned");
 
-  const chartColors = ["#6366f1","#8b5cf6","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#14b8a6","#f97316","#84cc16"];
+  const chartColors = ["#ED1C3E","#fa642c","#f59e0b","#e11d8f","#8b5cf6","#14b8a6","#10b981","#3b82f6","#f97316","#84cc16"];
   const axisColor    = isDark ? "#94a3b8" : "#64748b";
   const tooltipBg     = isDark ? "#1e293b" : "#ffffff";
   const tooltipBorder = isDark ? "#334155" : "#e5e7eb";
@@ -297,10 +297,10 @@ export default function TicketsTab() {
               sub={`Based on ${s.resolved} resolved tickets`} />
             <MetricCard icon="🏢" label="Avg Resolution — Office Hours" value={s.avgOfficeHoursFmt}
               sub={`Created 9:00 AM - 5:00 PM GMT+6 · ${s.avgOfficeHoursCount} tickets`}
-              valueColor="text-blue-600 dark:text-blue-400" />
+              valueColor="text-[#ED1C3E] dark:text-[#ff5a70]" />
             <MetricCard icon="🌙" label="Avg Resolution — Outside Hours" value={s.avgOutsideHoursFmt}
               sub={`Created 5:01 PM - 8:59 AM GMT+6 · ${s.avgOutsideHoursCount} tickets`}
-              valueColor="text-purple-600 dark:text-purple-400" />
+              valueColor="text-[#fa642c] dark:text-[#fb7a4a]" />
           </div>
 
           {/* SLA overview */}

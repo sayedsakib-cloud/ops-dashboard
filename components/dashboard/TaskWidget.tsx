@@ -47,7 +47,7 @@ export default function TaskWidget({ data, columns }: TaskWidgetProps) {
           {topPeople.map(([person, count]) => (
             <div key={person} className="flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3">
               <span className="text-sm text-slate-300">{person}</span>
-              <span className="text-sm font-semibold text-sky-400">{count} tasks</span>
+              <span className="text-sm font-semibold text-[#ff5a70]">{count} tasks</span>
             </div>
           ))}
         </div>

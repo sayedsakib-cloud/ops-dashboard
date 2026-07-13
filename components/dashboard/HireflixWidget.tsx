@@ -35,7 +35,7 @@ export default function HireflixWidget({ data }: HireflixWidgetProps) {
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
         <div className="rounded-2xl bg-slate-900 p-4">
           <p className="text-xs text-slate-400">Total Count</p>
-          <p className="mt-2 text-3xl font-bold text-sky-400">{totalCount}</p>
+          <p className="mt-2 text-3xl font-bold text-[#ff5a70]">{totalCount}</p>
         </div>
         <div className="rounded-2xl bg-slate-900 p-4">
           <p className="text-xs text-slate-400">Contributors</p>
@@ -49,7 +49,7 @@ export default function HireflixWidget({ data }: HireflixWidgetProps) {
           {topPeople.map(([person, count]) => (
             <div key={person} className="flex items-center justify-between rounded-lg bg-slate-900 px-4 py-3">
               <span className="text-sm text-slate-300">{person}</span>
-              <span className="text-sm font-semibold text-sky-400">{count}</span>
+              <span className="text-sm font-semibold text-[#ff5a70]">{count}</span>
             </div>
           ))}
         </div>

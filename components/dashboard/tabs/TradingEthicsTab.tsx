@@ -57,9 +57,11 @@ function setCached(key: string, data: TeepData) {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────
+// Brand-led categorical palette: red/orange first, then distinct hues kept
+// so multiple agents/series stay visually separable.
 const PALETTE = [
-  "bg-indigo-500","bg-purple-500","bg-pink-500","bg-blue-500",
-  "bg-teal-500","bg-emerald-500","bg-orange-500","bg-rose-500",
+  "bg-red-500","bg-orange-500","bg-rose-500","bg-amber-500",
+  "bg-pink-500","bg-teal-500","bg-violet-500","bg-emerald-500",
 ];
 function avatarColor(name: string) {
   let h = 0;
@@ -87,7 +89,7 @@ function slaBarColor(rate: number) {
 function Tip({ text }: { text: string }) {
   return (
     <span title={text}
-      className="ml-1 inline-flex h-4 w-4 flex-shrink-0 cursor-help items-center justify-center rounded-full bg-blue-500 align-middle text-xs font-bold text-white transition-colors hover:bg-blue-600">
+      className="ml-1 inline-flex h-4 w-4 flex-shrink-0 cursor-help items-center justify-center rounded-full bg-primary align-middle text-xs font-bold text-primary-foreground transition-colors hover:bg-primary/85">
       i
     </span>
   );
@@ -356,7 +358,7 @@ export default function TradingEthicsTab() {
                     <span className="w-4 text-xs font-bold text-muted-foreground">{i + 1}.</span>
                     <AgentAvatar name={ag.name} size="xs" />
                     <span className="flex-1 truncate text-xs font-medium">{ag.name}</span>
-                    <span className="text-xs font-bold text-indigo-600 dark:text-indigo-400">{ag.closed}</span>
+                    <span className="text-xs font-bold text-primary">{ag.closed}</span>
                   </div>
                 ))}
               </div>
@@ -418,7 +420,7 @@ export default function TradingEthicsTab() {
                       </TableCell>
                       <TableCell className="text-center font-medium text-muted-foreground">{row.assigned}</TableCell>
                       <TableCell className="text-center font-medium text-muted-foreground">{row.repliedTo}</TableCell>
-                      <TableCell className="text-center font-semibold text-indigo-600 dark:text-indigo-400">{row.repliesSent ?? 0}</TableCell>
+                      <TableCell className="text-center font-semibold text-primary">{row.repliesSent ?? 0}</TableCell>
                       <TableCell className="text-center font-bold">{row.closed}</TableCell>
                       <TableCell className="text-center font-bold">{row.closedByAgent ?? row.closed}</TableCell>
                     </TableRow>

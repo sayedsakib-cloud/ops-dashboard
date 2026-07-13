@@ -18,7 +18,7 @@ const TAB_TRIGGER_CLS =
   "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm";
 
 // ---- safe markdown -> html: escape everything, then a controlled subset ----
-const LINK_CLS = "text-sky-600 underline decoration-sky-400/50 underline-offset-2 dark:text-sky-400";
+const LINK_CLS = "text-primary underline decoration-primary/40 underline-offset-2 hover:decoration-primary";
 
 function inlineMd(raw: string): string {
   let s = raw.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
