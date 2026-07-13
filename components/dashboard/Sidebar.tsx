@@ -55,8 +55,8 @@ export default function Sidebar({ active, onSwitch }: Props) {
               className={cn(
                 "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors duration-150",
                 isActive
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground"
-                  : "text-muted-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground",
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm shadow-primary/30"
+                  : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground",
               )}>
               <Icon className="h-[18px] w-[18px] flex-shrink-0" />
               {!collapsed ? <span className="overflow-hidden text-ellipsis whitespace-nowrap">{item.label}</span> : null}
@@ -78,7 +78,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
           {!collapsed ? (
             <div className="min-w-0 flex-1">
               <p className="truncate text-xs font-semibold text-sidebar-foreground">{name}</p>
-              <p className="truncate text-[10px] text-muted-foreground">{email}</p>
+              <p className="truncate text-[10px] text-sidebar-foreground/50">{email}</p>
             </div>
           ) : null}
         </div>
@@ -87,7 +87,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
           title="Sign out"
           className={cn(
             "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs font-medium",
-            "text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive",
+            "text-sidebar-foreground/60 transition-colors hover:bg-destructive/15 hover:text-destructive",
           )}>
           <LogOut className="h-[15px] w-[15px] flex-shrink-0" />
           {!collapsed ? <span>Sign Out</span> : null}

@@ -3,77 +3,85 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ===================================================================
+   NEXT Ventures brand system — Red / White / Black.
+   Brand red  #ED1C3E  ≈ oklch(0.577 0.214 19)
+   Secondary  #fa642c  (orange) reserved for gradients/charts.
+   Light: off-white canvas, white cards, near-black ink, red accents,
+   and an always-black sidebar so the shell reads red/white/black.
+   =================================================================== */
 :root {
   --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.129 0.042 264.695);
+  --background: oklch(0.985 0.002 25);
+  --foreground: oklch(0.16 0.008 25);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.129 0.042 264.695);
+  --card-foreground: oklch(0.16 0.008 25);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.129 0.042 264.695);
-  --primary: oklch(0.208 0.042 265.755);
-  --primary-foreground: oklch(0.984 0.003 247.858);
-  --secondary: oklch(0.968 0.007 247.896);
-  --secondary-foreground: oklch(0.208 0.042 265.755);
-  --muted: oklch(0.968 0.007 247.896);
-  --muted-foreground: oklch(0.554 0.046 257.417);
-  --accent: oklch(0.968 0.007 247.896);
-  --accent-foreground: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.16 0.008 25);
+  --primary: oklch(0.577 0.214 19);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.955 0.004 25);
+  --secondary-foreground: oklch(0.2 0.01 25);
+  --muted: oklch(0.955 0.004 25);
+  --muted-foreground: oklch(0.5 0.014 25);
+  --accent: oklch(0.955 0.032 20);
+  --accent-foreground: oklch(0.44 0.17 20);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.929 0.013 255.508);
-  --input: oklch(0.929 0.013 255.508);
-  --ring: oklch(0.704 0.04 256.788);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
+  --border: oklch(0.9 0.005 25);
+  --input: oklch(0.9 0.005 25);
+  --ring: oklch(0.577 0.214 19);
+  --chart-1: oklch(0.577 0.214 19);
+  --chart-2: oklch(0.68 0.19 42);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.984 0.003 247.858);
-  --sidebar-foreground: oklch(0.129 0.042 264.695);
-  --sidebar-primary: oklch(0.208 0.042 265.755);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.968 0.007 247.896);
-  --sidebar-accent-foreground: oklch(0.208 0.042 265.755);
-  --sidebar-border: oklch(0.929 0.013 255.508);
-  --sidebar-ring: oklch(0.704 0.04 256.788);
+  --chart-5: oklch(0.6 0.118 184.704);
+  --sidebar: oklch(0.16 0.006 25);
+  --sidebar-foreground: oklch(0.97 0.002 25);
+  --sidebar-primary: oklch(0.577 0.214 19);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.26 0.008 25);
+  --sidebar-accent-foreground: oklch(0.97 0.002 25);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.577 0.214 19);
 }
 
 .dark {
-  /* Brand rebrand: dark base de-blued to a warm near-black charcoal (hue ~20),
-     accents/focus driven by NEXT Ventures red #ED1C3E (oklch ~0.58 0.21 18). */
-  --background: oklch(0.135 0.018 20);
-  --foreground: oklch(0.984 0.003 247.858);
-  --card: oklch(0.205 0.02 20);
-  --card-foreground: oklch(0.984 0.003 247.858);
-  --popover: oklch(0.205 0.02 20);
-  --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
-  --primary-foreground: oklch(0.208 0.042 265.755);
-  --secondary: oklch(0.275 0.02 20);
-  --secondary-foreground: oklch(0.984 0.003 247.858);
-  --muted: oklch(0.275 0.02 20);
-  --muted-foreground: oklch(0.704 0.03 25);
-  --accent: oklch(0.275 0.02 20);
-  --accent-foreground: oklch(0.984 0.003 247.858);
+  /* Dark: true near-black canvas, cards lifted a clear step so they read as
+     panels, crisp white ink, brand red #ED1C3E (brightened slightly for dark
+     legibility) on focus/active/primary. */
+  --background: oklch(0.145 0.005 25);
+  --foreground: oklch(0.97 0.002 25);
+  --card: oklch(0.205 0.008 25);
+  --card-foreground: oklch(0.97 0.002 25);
+  --popover: oklch(0.205 0.008 25);
+  --popover-foreground: oklch(0.97 0.002 25);
+  --primary: oklch(0.62 0.212 20);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.26 0.008 25);
+  --secondary-foreground: oklch(0.97 0.002 25);
+  --muted: oklch(0.26 0.008 25);
+  --muted-foreground: oklch(0.68 0.012 25);
+  --accent: oklch(0.3 0.045 20);
+  --accent-foreground: oklch(0.97 0.002 25);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(1 0 0 / 10%);
+  --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.58 0.21 18);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
+  --ring: oklch(0.62 0.212 20);
+  --chart-1: oklch(0.62 0.212 20);
+  --chart-2: oklch(0.7 0.19 42);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.185 0.02 20);
-  --sidebar-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-primary: oklch(0.58 0.21 18);
-  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-accent: oklch(0.275 0.02 20);
-  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.58 0.21 18);
+  --chart-5: oklch(0.696 0.17 162.48);
+  --sidebar: oklch(0.13 0.005 25);
+  --sidebar-foreground: oklch(0.97 0.002 25);
+  --sidebar-primary: oklch(0.62 0.212 20);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.24 0.008 25);
+  --sidebar-accent-foreground: oklch(0.97 0.002 25);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.62 0.212 20);
 }
 
 @theme inline {
@@ -129,12 +137,13 @@
    Delete this whole block once every tab is migrated.
    =================================================================== */
 .ops-dark .bg-white {
-  background-color: rgba(28, 17, 20, 0.72) !important;
+  background-color: rgba(41, 33, 35, 0.72) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(10px) saturate(118%);
   -webkit-backdrop-filter: blur(10px) saturate(118%);
 }
-.ops-dark .bg-gray-50  { background-color: #141013 !important; }
-.ops-dark .bg-gray-100 { background-color: #100c0e !important; }
+.ops-dark .bg-gray-50  { background-color: #191416 !important; }
+.ops-dark .bg-gray-100 { background-color: #120e10 !important; }
 .ops-dark tr.bg-white {
   background-color: rgba(255, 255, 255, 0.025) !important;
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important;
