@@ -29,7 +29,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
     )}>
       <div className="flex h-16 flex-shrink-0 items-center gap-3 border-b border-sidebar-border px-4">
         <img src="/fn-logo.svg" alt="FN" width={32} height={32} className="flex-shrink-0 rounded-sm object-contain" />
-        {!collapsed ? <span className="whitespace-nowrap text-xl font-bold tracking-tight">Ops Metrics</span> : null}
+        {!collapsed ? <span className="whitespace-nowrap text-xl font-bold tracking-tight">OpsCore</span> : null}
       </div>
 
       <button
