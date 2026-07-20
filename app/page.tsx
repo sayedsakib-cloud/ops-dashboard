@@ -57,7 +57,7 @@ export default function DashboardPage() {
         <Sidebar active={active} onSwitch={switchTab} />
 
         <div className="flex flex-1 flex-col overflow-hidden min-w-0">
-          <header className="flex h-14 flex-shrink-0 items-center gap-4 border-b border-border bg-background/80 px-6 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+          <header className="flex h-14 flex-shrink-0 items-center gap-4 border-b border-border bg-card/80 px-6 backdrop-blur supports-[backdrop-filter]:bg-card/70">
             <h1 className="text-sm font-medium text-foreground">{TAB_LABELS[active]}</h1>
             <div className="ml-auto"><ModeToggle /></div>
           </header>

@@ -24,7 +24,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
   return (
     <aside className={cn(
       "relative z-30 flex h-screen flex-shrink-0 flex-col border-r border-sidebar-border",
-      "bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out",
+      "sidebar-surface bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out",
       collapsed ? "w-[72px]" : "w-60",
     )}>
       <div className="flex h-16 flex-shrink-0 items-center gap-3 border-b border-sidebar-border px-4">
