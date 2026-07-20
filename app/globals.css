@@ -44,10 +44,11 @@
   --sidebar-accent-foreground: oklch(0.96 0.01 286);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.535 0.175 285);
-  /* Sidebar vertical gradient — lighter indigo at top to deeper navy at
-     the bottom (matches the brand reference). */
-  --sidebar-grad-from: oklch(0.3 0.06 288);
-  --sidebar-grad-to: oklch(0.235 0.05 288);
+  /* Sidebar vertical gradient — vivid indigo at top easing to deep
+     blue-navy at the bottom (matches the brand reference). Wide lightness
+     + hue spread so the gradient is clearly visible on a tall rail. */
+  --sidebar-grad-from: oklch(0.37 0.12 292);
+  --sidebar-grad-to: oklch(0.19 0.06 268);
 }
 
 .dark {
@@ -86,9 +87,10 @@
   --sidebar-accent-foreground: oklch(0.96 0.01 286);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.62 0.17 284);
-  /* Keep the sidebar visibly indigo in dark mode — never collapse to black. */
-  --sidebar-grad-from: oklch(0.24 0.055 287);
-  --sidebar-grad-to: oklch(0.175 0.04 287);
+  /* Keep the sidebar visibly indigo in dark mode — never collapse to black,
+     and give it the same clearly-visible top-to-bottom gradient. */
+  --sidebar-grad-from: oklch(0.33 0.11 292);
+  --sidebar-grad-to: oklch(0.155 0.05 268);
 }
 
 @theme inline {
