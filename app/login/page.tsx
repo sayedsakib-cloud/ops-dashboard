@@ -34,8 +34,8 @@ function LoginInner() {
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            "radial-gradient(700px 380px at 15% 0%, rgba(237,28,62,0.12), transparent 60%)," +
-            "radial-gradient(640px 420px at 100% 100%, rgba(250,100,44,0.08), transparent 55%)",
+            "radial-gradient(700px 380px at 15% 0%, rgba(91,91,214,0.14), transparent 60%)," +
+            "radial-gradient(640px 420px at 100% 100%, rgba(59,130,246,0.10), transparent 55%)",
         }}
       />
 

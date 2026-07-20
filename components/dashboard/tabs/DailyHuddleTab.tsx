@@ -348,7 +348,7 @@ function HuddleMetricsSection({ range, onBounds }: { range: DateRange; onBounds:
             ) : (
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-rose-950/90 dark:bg-rose-950/70 hover:bg-rose-950/90 dark:hover:bg-rose-950/70">
+                  <TableRow className="bg-indigo-950/90 dark:bg-indigo-950/70 hover:bg-indigo-950/90 dark:hover:bg-indigo-950/70">
                     <TableHead className="text-white">Date</TableHead>
                     <TableHead className="text-white">Community Chaos</TableHead>
                     <TableHead className="text-white">Trustpilot Negative Reviews</TableHead>
@@ -375,7 +375,7 @@ function HuddleMetricsSection({ range, onBounds }: { range: DateRange; onBounds:
           <CardContent className="p-0">
             <Table>
               <TableHeader>
-                <TableRow className="bg-rose-950/90 dark:bg-rose-950/70 hover:bg-rose-950/90 dark:hover:bg-rose-950/70">
+                <TableRow className="bg-indigo-950/90 dark:bg-indigo-950/70 hover:bg-indigo-950/90 dark:hover:bg-indigo-950/70">
                   <TableHead className="text-white">date</TableHead>
                   <TableHead className="text-white">rule_or_policy</TableHead>
                   <TableHead className="text-white">viewCount</TableHead>
@@ -464,7 +464,7 @@ function AlignmentSection({ range }: { range: DateRange }) {
   return (
     <div className="space-y-4">
       {/* Banner header */}
-      <Card className="overflow-hidden border-0 bg-rose-950/95 dark:bg-rose-950/85">
+      <Card className="overflow-hidden border-0 bg-indigo-950/95 dark:bg-indigo-950/85">
         <CardContent className="flex items-center justify-between p-4">
           <h2 className="text-xl font-bold tracking-tight text-white">Alignment Huddle</h2>
           {headerDate ? (
@@ -505,7 +505,7 @@ function AlignmentCard({ title, rows, variant }: { title: string; rows: AlignRow
       <CardContent className="p-0">
         <Table>
           <TableHeader>
-            <TableRow className="bg-rose-950/90 dark:bg-rose-950/70 hover:bg-rose-950/90 dark:hover:bg-rose-950/70">
+            <TableRow className="bg-indigo-950/90 dark:bg-indigo-950/70 hover:bg-indigo-950/90 dark:hover:bg-indigo-950/70">
               <TableHead className="w-24 text-white">Date</TableHead>
               <TableHead className="text-white">{colA}</TableHead>
               <TableHead className="text-white">{colB}</TableHead>
@@ -814,7 +814,7 @@ function BizOpsWeeklyChart({ data }: { data: WeeklyPayload }) {
 
   return (
     <Card className="overflow-hidden border bg-card">
-      <CardHeader className="bg-rose-950/90 dark:bg-rose-950/70 py-3">
+      <CardHeader className="bg-indigo-950/90 dark:bg-indigo-950/70 py-3">
         <CardTitle className="text-center text-base font-bold text-white">BizOps Weekly Trend</CardTitle>
       </CardHeader>
       <CardContent className="p-4">
@@ -873,7 +873,7 @@ function CrEmailClosedChart({ data }: { data: WeeklyPayload }) {
 
   return (
     <Card className="overflow-hidden border bg-card">
-      <CardHeader className="bg-rose-950/90 dark:bg-rose-950/70 py-3">
+      <CardHeader className="bg-indigo-950/90 dark:bg-indigo-950/70 py-3">
         <CardTitle className="text-center text-base font-bold text-white">CR Weekly Trend</CardTitle>
       </CardHeader>
       <CardContent className="p-4">
@@ -923,7 +923,7 @@ function CrSavingsChart({ data }: { data: WeeklyPayload }) {
 
   return (
     <Card className="overflow-hidden border bg-card">
-      <CardHeader className="bg-rose-950/90 dark:bg-rose-950/70 py-3">
+      <CardHeader className="bg-indigo-950/90 dark:bg-indigo-950/70 py-3">
         <CardTitle className="text-center text-base font-bold text-white">Savings Amount</CardTitle>
       </CardHeader>
       <CardContent className="p-4">

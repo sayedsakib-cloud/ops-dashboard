@@ -38,7 +38,7 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
           className={`fixed inset-0 z-[200] flex flex-col items-center justify-center transition-opacity duration-500 ${phase >= 3 ? "opacity-0 pointer-events-none" : "opacity-100"}`}
           style={{
             background:
-              "radial-gradient(ellipse at 18% 62%, rgba(60,12,22,0.9) 0%, #0b0709 55%, rgba(48,10,24,0.75) 100%)",
+              "radial-gradient(ellipse at 18% 62%, rgba(30,28,60,0.9) 0%, #0a0912 55%, rgba(24,22,52,0.75) 100%)",
           }}
         >
           {/* Spinning arc + center icon */}
@@ -54,9 +54,9 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
             >
               <defs>
                 <linearGradient id="loaderArc1" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%"   stopColor="#fa642c" stopOpacity="0" />
-                  <stop offset="55%"  stopColor="#ED1C3E" stopOpacity="1" />
-                  <stop offset="100%" stopColor="#fa642c" stopOpacity="1" />
+                  <stop offset="0%"   stopColor="#3B82F6" stopOpacity="0" />
+                  <stop offset="55%"  stopColor="#5B5BD6" stopOpacity="1" />
+                  <stop offset="100%" stopColor="#818cf8" stopOpacity="1" />
                 </linearGradient>
               </defs>
               <circle
@@ -78,8 +78,8 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
             >
               <defs>
                 <linearGradient id="loaderArc2" x1="128" y1="0" x2="0" y2="128" gradientUnits="userSpaceOnUse">
-                  <stop offset="0%"   stopColor="#fa642c" stopOpacity="0" />
-                  <stop offset="100%" stopColor="#ED1C3E" stopOpacity="0.4" />
+                  <stop offset="0%"   stopColor="#818cf8" stopOpacity="0" />
+                  <stop offset="100%" stopColor="#5B5BD6" stopOpacity="0.4" />
                 </linearGradient>
               </defs>
               <circle
@@ -95,8 +95,8 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
             <div
               className="w-[80px] h-[80px] rounded-full flex items-center justify-center z-10"
               style={{
-                background: "radial-gradient(circle at 35% 35%, #6e1220 0%, #1a0a0e 100%)",
-                boxShadow: "0 0 32px rgba(237,28,62,0.28), inset 0 0 20px rgba(250,100,44,0.10)",
+                background: "radial-gradient(circle at 35% 35%, #2e2d6e 0%, #12111f 100%)",
+                boxShadow: "0 0 32px rgba(91,91,214,0.3), inset 0 0 20px rgba(59,130,246,0.12)",
               }}
             >
               {/*
@@ -105,11 +105,11 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
               */}
               <svg viewBox="0 0 40 40" className="w-10 h-10" fill="none" xmlns="http://www.w3.org/2000/svg">
                 {/* Stylised "OM" analytics icon until real icon is provided */}
-                <rect x="6"  y="24" width="5"  height="10" rx="1" fill="#ED1C3E" opacity="0.9" />
-                <rect x="14" y="18" width="5"  height="16" rx="1" fill="#ED1C3E" />
-                <rect x="22" y="12" width="5"  height="22" rx="1" fill="#fa642c" />
-                <rect x="30" y="20" width="5"  height="14" rx="1" fill="#fa642c" opacity="0.7" />
-                <path d="M8 22 L16 16 L24 10 L32 18" stroke="#fa642c" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                <rect x="6"  y="24" width="5"  height="10" rx="1" fill="#5B5BD6" opacity="0.9" />
+                <rect x="14" y="18" width="5"  height="16" rx="1" fill="#5B5BD6" />
+                <rect x="22" y="12" width="5"  height="22" rx="1" fill="#818cf8" />
+                <rect x="30" y="20" width="5"  height="14" rx="1" fill="#818cf8" opacity="0.7" />
+                <path d="M8 22 L16 16 L24 10 L32 18" stroke="#3B82F6" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
           {/* Status text */}
           <p
             className="mt-7 text-[11px] font-medium tracking-[0.3em] transition-all duration-500"
-            style={{ color: phase >= 2 ? "#ED1C3E" : "#8a6a70" }}
+            style={{ color: phase >= 2 ? "#818cf8" : "#6a6a8a" }}
           >
             {MSGS[phase]}
           </p>
@@ -129,8 +129,8 @@ export default function DashboardLoader({ children }: { children: React.ReactNod
                 key={i}
                 className="w-1.5 h-1.5 rounded-full transition-all duration-500"
                 style={{
-                  background:   phase > i ? "#ED1C3E" : "#3a2429",
-                  boxShadow:    phase > i ? "0 0 6px rgba(237,28,62,0.6)" : "none",
+                  background:   phase > i ? "#5B5BD6" : "#26263a",
+                  boxShadow:    phase > i ? "0 0 6px rgba(91,91,214,0.6)" : "none",
                   transform:    phase > i ? "scale(1.2)" : "scale(1)",
                 }}
               />

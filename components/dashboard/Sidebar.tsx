@@ -55,7 +55,7 @@ export default function Sidebar({ active, onSwitch }: Props) {
               className={cn(
                 "flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm font-medium transition-colors duration-150",
                 isActive
-                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm shadow-primary/30"
+                  ? "bg-sidebar-primary text-sidebar-primary-foreground shadow-sm"
                   : "text-sidebar-foreground/60 hover:bg-sidebar-accent hover:text-sidebar-foreground",
               )}>
               <Icon className="h-[18px] w-[18px] flex-shrink-0" />

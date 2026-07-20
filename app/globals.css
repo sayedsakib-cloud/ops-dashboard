@@ -4,84 +4,84 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ===================================================================
-   NEXT Ventures brand system — Red / White / Black.
-   Brand red  #ED1C3E  ≈ oklch(0.577 0.214 19)
-   Secondary  #fa642c  (orange) reserved for gradients/charts.
-   Light: off-white canvas, white cards, near-black ink, red accents,
-   and an always-black sidebar so the shell reads red/white/black.
+   NEXT Ventures brand system — Indigo / Navy / White.
+   Primary  indigo #5B5BD6 ≈ oklch(0.535 0.175 285)
+   Secondary  blue #3B82F6 reserved for secondary badges/charts.
+   Light: light-gray canvas, white cards, indigo accents, and a deep
+   indigo-navy sidebar (#211E3F) with a light active pill.
    =================================================================== */
 :root {
   --radius: 0.625rem;
-  --background: oklch(0.985 0.002 25);
-  --foreground: oklch(0.16 0.008 25);
+  --background: oklch(0.975 0.004 286);
+  --foreground: oklch(0.21 0.03 285);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.16 0.008 25);
+  --card-foreground: oklch(0.21 0.03 285);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.16 0.008 25);
-  --primary: oklch(0.577 0.214 19);
+  --popover-foreground: oklch(0.21 0.03 285);
+  --primary: oklch(0.535 0.175 285);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.004 25);
-  --secondary-foreground: oklch(0.2 0.01 25);
-  --muted: oklch(0.955 0.004 25);
-  --muted-foreground: oklch(0.5 0.014 25);
-  --accent: oklch(0.955 0.032 20);
-  --accent-foreground: oklch(0.44 0.17 20);
+  --secondary: oklch(0.955 0.006 286);
+  --secondary-foreground: oklch(0.25 0.03 285);
+  --muted: oklch(0.955 0.006 286);
+  --muted-foreground: oklch(0.5 0.02 285);
+  --accent: oklch(0.95 0.03 285);
+  --accent-foreground: oklch(0.42 0.15 285);
   --destructive: oklch(0.577 0.245 27.325);
   --destructive-foreground: oklch(0.984 0.003 247.858);
-  --border: oklch(0.9 0.005 25);
-  --input: oklch(0.9 0.005 25);
-  --ring: oklch(0.577 0.214 19);
-  --chart-1: oklch(0.577 0.214 19);
-  --chart-2: oklch(0.68 0.19 42);
-  --chart-3: oklch(0.398 0.07 227.392);
+  --border: oklch(0.9 0.008 286);
+  --input: oklch(0.9 0.008 286);
+  --ring: oklch(0.535 0.175 285);
+  --chart-1: oklch(0.535 0.175 285);
+  --chart-2: oklch(0.62 0.19 258);
+  --chart-3: oklch(0.6 0.118 184.704);
   --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.6 0.118 184.704);
-  --sidebar: oklch(0.16 0.006 25);
-  --sidebar-foreground: oklch(0.97 0.002 25);
-  --sidebar-primary: oklch(0.577 0.214 19);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.26 0.008 25);
-  --sidebar-accent-foreground: oklch(0.97 0.002 25);
-  --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.577 0.214 19);
+  --chart-5: oklch(0.646 0.222 41.116);
+  --sidebar: oklch(0.245 0.05 288);
+  --sidebar-foreground: oklch(0.9 0.02 286);
+  --sidebar-primary: oklch(0.97 0.004 286);
+  --sidebar-primary-foreground: oklch(0.28 0.06 286);
+  --sidebar-accent: oklch(0.31 0.05 288);
+  --sidebar-accent-foreground: oklch(0.96 0.01 286);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.535 0.175 285);
 }
 
 .dark {
-  /* Dark: true near-black canvas, cards lifted a clear step so they read as
-     panels, crisp white ink, brand red #ED1C3E (brightened slightly for dark
-     legibility) on focus/active/primary. */
-  --background: oklch(0.145 0.005 25);
-  --foreground: oklch(0.97 0.002 25);
-  --card: oklch(0.205 0.008 25);
-  --card-foreground: oklch(0.97 0.002 25);
-  --popover: oklch(0.205 0.008 25);
-  --popover-foreground: oklch(0.97 0.002 25);
-  --primary: oklch(0.62 0.212 20);
+  /* Dark: deep indigo-navy canvas, cards lifted a clear step so they read as
+     panels, crisp white ink, indigo #5B5BD6 (brightened for dark legibility)
+     on focus/active/primary. */
+  --background: oklch(0.16 0.02 285);
+  --foreground: oklch(0.97 0.006 286);
+  --card: oklch(0.215 0.025 285);
+  --card-foreground: oklch(0.97 0.006 286);
+  --popover: oklch(0.215 0.025 285);
+  --popover-foreground: oklch(0.97 0.006 286);
+  --primary: oklch(0.62 0.17 284);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.26 0.008 25);
-  --secondary-foreground: oklch(0.97 0.002 25);
-  --muted: oklch(0.26 0.008 25);
-  --muted-foreground: oklch(0.68 0.012 25);
-  --accent: oklch(0.3 0.045 20);
-  --accent-foreground: oklch(0.97 0.002 25);
+  --secondary: oklch(0.27 0.025 285);
+  --secondary-foreground: oklch(0.97 0.006 286);
+  --muted: oklch(0.27 0.025 285);
+  --muted-foreground: oklch(0.72 0.03 286);
+  --accent: oklch(0.32 0.06 285);
+  --accent-foreground: oklch(0.97 0.006 286);
   --destructive: oklch(0.704 0.191 22.216);
   --destructive-foreground: oklch(0.984 0.003 247.858);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.62 0.212 20);
-  --chart-1: oklch(0.62 0.212 20);
-  --chart-2: oklch(0.7 0.19 42);
+  --ring: oklch(0.62 0.17 284);
+  --chart-1: oklch(0.62 0.17 284);
+  --chart-2: oklch(0.7 0.16 258);
   --chart-3: oklch(0.769 0.188 70.08);
   --chart-4: oklch(0.627 0.265 303.9);
   --chart-5: oklch(0.696 0.17 162.48);
-  --sidebar: oklch(0.13 0.005 25);
-  --sidebar-foreground: oklch(0.97 0.002 25);
-  --sidebar-primary: oklch(0.62 0.212 20);
-  --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.24 0.008 25);
-  --sidebar-accent-foreground: oklch(0.97 0.002 25);
+  --sidebar: oklch(0.15 0.025 286);
+  --sidebar-foreground: oklch(0.9 0.02 286);
+  --sidebar-primary: oklch(0.9 0.01 286);
+  --sidebar-primary-foreground: oklch(0.2 0.04 286);
+  --sidebar-accent: oklch(0.26 0.03 286);
+  --sidebar-accent-foreground: oklch(0.96 0.01 286);
   --sidebar-border: oklch(1 0 0 / 8%);
-  --sidebar-ring: oklch(0.62 0.212 20);
+  --sidebar-ring: oklch(0.62 0.17 284);
 }
 
 @theme inline {
@@ -137,19 +137,19 @@
    Delete this whole block once every tab is migrated.
    =================================================================== */
 .ops-dark .bg-white {
-  background-color: rgba(41, 33, 35, 0.72) !important;
+  background-color: rgba(32, 31, 52, 0.72) !important;
   border: 1px solid rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(10px) saturate(118%);
   -webkit-backdrop-filter: blur(10px) saturate(118%);
 }
-.ops-dark .bg-gray-50  { background-color: #191416 !important; }
-.ops-dark .bg-gray-100 { background-color: #120e10 !important; }
+.ops-dark .bg-gray-50  { background-color: #16162a !important; }
+.ops-dark .bg-gray-100 { background-color: #101020 !important; }
 .ops-dark tr.bg-white {
   background-color: rgba(255, 255, 255, 0.025) !important;
   backdrop-filter: none !important; -webkit-backdrop-filter: none !important; box-shadow: none !important;
 }
 .ops-dark tr.bg-gray-50\/60 { background-color: transparent !important; backdrop-filter: none !important; }
-.ops-dark tr.bg-white:hover, .ops-dark tr.bg-gray-50\/60:hover { background-color: rgba(237, 28, 62, 0.07) !important; }
+.ops-dark tr.bg-white:hover, .ops-dark tr.bg-gray-50\/60:hover { background-color: rgba(91, 91, 214, 0.1) !important; }
 .ops-dark .bg-gray-50\/50 { background-color: rgba(255,255,255,0.02) !important; }
 .ops-dark .border-gray-100, .ops-dark .border-gray-200, .ops-dark .border-gray-300 { border-color: rgba(148, 163, 184, 0.10) !important; }
 .ops-dark .border-b { border-bottom-color: rgba(148, 163, 184, 0.08) !important; }
@@ -164,15 +164,15 @@
 .ops-dark .text-gray-600 { color: #8aa6c4 !important; }
 .ops-dark .text-gray-500 { color: #6e8cab !important; }
 .ops-dark .text-gray-400 { color: #51708d !important; }
-.ops-dark .hover\:bg-gray-50:hover, .ops-dark .hover\:bg-gray-100:hover, .ops-dark .hover\:bg-gray-200:hover { background-color: rgba(237,28,62,0.08) !important; }
+.ops-dark .hover\:bg-gray-50:hover, .ops-dark .hover\:bg-gray-100:hover, .ops-dark .hover\:bg-gray-200:hover { background-color: rgba(91,91,214,0.1) !important; }
 .ops-dark input[type="date"], .ops-dark input[type="text"], .ops-dark input[type="search"], .ops-dark select, .ops-dark textarea {
-  background-color: rgba(22,13,16,0.6) !important; color: #eedadf !important; border-color: rgba(148,163,184,0.14) !important; color-scheme: dark;
+  background-color: rgba(20,20,34,0.6) !important; color: #d8d8ea !important; border-color: rgba(148,163,184,0.14) !important; color-scheme: dark;
 }
 .ops-dark input[type="date"]:focus, .ops-dark input[type="text"]:focus, .ops-dark select:focus {
-  border-color: #ED1C3E !important; box-shadow: 0 0 0 2px rgba(237,28,62,0.25) !important; outline: none !important;
+  border-color: #5B5BD6 !important; box-shadow: 0 0 0 2px rgba(91,91,214,0.3) !important; outline: none !important;
 }
-.ops-dark input::placeholder { color: #a06a74 !important; }
-.ops-dark select option { background-color: #141013; color: #f5eaec; }
+.ops-dark input::placeholder { color: #6f6f9a !important; }
+.ops-dark select option { background-color: #16162a; color: #eaeaf5; }
 .ops-dark .bg-gray-100.rounded-full, .ops-dark .bg-gray-100.h-1\.5 { background-color: rgba(255,255,255,0.06) !important; }
 .ops-dark .bg-green-100 { background-color: rgba(21,128,61,0.22) !important; }
 .ops-dark .bg-green-50 { background-color: rgba(21,128,61,0.12) !important; }
