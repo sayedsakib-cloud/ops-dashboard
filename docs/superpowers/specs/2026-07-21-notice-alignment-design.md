@@ -50,21 +50,24 @@ create table notice_likes (
   primary key (notice_id, user_email)
 );
 
-create index notices_created_at_idx on notices (created_at desc);
+create index notices_created_at_idx on notices (created_at desc, id desc);
 create index notices_tags_idx on notices using gin (tags);
 ```
 
 - Author identity comes from the NextAuth session (`session.user.email`/`name`) — no manual author picker.
 - Attachments: images uploaded to a Supabase Storage bucket (`notice-attachments`); links stored as plain URL + shown as a link card (no OG-image thumbnail fetch in v1 — extra failure surface, skip it).
 - Likes: one row per (notice, user) — natural dedupe; join to get "who liked" names.
+- Tags are lowercased + trimmed on write to prevent silent fragmentation ("Workshop" vs "workshop") in the tag filter.
+- Cursor for pagination is the composite `(created_at, id)`, not `created_at` alone — guarantees stable ordering when two posts share a timestamp.
 
 ## API Routes
 
 ```
-GET  /api/notice              — cursor-paginated list; query params: keyword, from, to, tags[]
-POST /api/notice               — create notice (title, description, tags[], attachments[])
-POST /api/notice/[id]/like     — toggle like for current user (insert or delete row)
-POST /api/notice/upload        — upload image to Storage, return public URL
+GET    /api/notice              — cursor-paginated list; query params: keyword, from, to, tags[]
+POST   /api/notice               — create notice (title, description, tags[], attachments[])
+DELETE /api/notice/[id]          — delete own notice (author-only check via session email; no broader moderation in phase 1)
+POST   /api/notice/[id]/like     — toggle like for current user (insert or delete row)
+POST   /api/notice/upload        — upload image to Storage, return public URL
 ```
 
 Keyword search uses Postgres `ilike` on title + description — sufficient at expected volume, no need for full-text search infra.
@@ -98,7 +101,7 @@ Search/filter is fetch-on-demand (not client-side real-time filtering) — keeps
 
 ## Access Control
 
-Deferred. For Phase 1, any authenticated user can create and view Notice posts. Role-based posting permissions (via an admin access panel) are explicitly out of scope here and will be designed in a later phase — this applies to both Notice and the future Alignment type-routing.
+Deferred. For Phase 1, any authenticated user can create and view Notice posts. Role-based posting permissions (via an admin access panel) are explicitly out of scope here and will be designed in a later phase — this applies to both Notice and the future Alignment type-routing. Author-only delete (own post) is in scope for phase 1 as a minimal safety valve; broader moderation (admin delete-any) is deferred with RBAC.
 
 ## Testing / Verification
 
