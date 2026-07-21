@@ -32,6 +32,27 @@ function normalizeTags(tags: string[]): string[] {
   return Array.from(new Set(tags.map(t => t.trim().toLowerCase()).filter(Boolean)));
 }
 
+// Escapes a user-supplied keyword so it can be safely embedded in a
+// PostgREST `.or()` ILIKE pattern: backslash-escapes SQL LIKE wildcards
+// (`\`, `%`, `_`) so they're treated as literals, and strips characters
+// that have special meaning in PostgREST's comma/paren-delimited filter
+// grammar (`,`, `(`, `)`, `*`) so the keyword can't inject extra clauses.
+function sanitizeKeyword(keyword: string): string {
+  return keyword
+    .replace(/\\/g, "\\\\")
+    .replace(/%/g, "\\%")
+    .replace(/_/g, "\\_")
+    .replace(/[,()*]/g, "");
+}
+
+// Widens a bare YYYY-MM-DD "to" date to the end of that day so notices
+// created later on the same day aren't excluded by a `lte` comparison
+// against a timestamptz column. Full ISO timestamps (containing "T")
+// are passed through unchanged.
+function endOfDayIfBareDate(value: string): string {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T23:59:59.999Z` : value;
+}
+
 export async function listNotices(opts: {
   keyword?: string; from?: string; to?: string; tags?: string[];
   cursor?: { createdAt: string; id: string } | null;
@@ -42,9 +63,12 @@ export async function listNotices(opts: {
 
   let query = c.from("notices").select("*").order("created_at", { ascending: false }).order("id", { ascending: false }).limit(limit + 1);
 
-  if (opts.keyword) query = query.or(`title.ilike.%${opts.keyword}%,description.ilike.%${opts.keyword}%`);
+  if (opts.keyword) {
+    const kw = sanitizeKeyword(opts.keyword);
+    query = query.or(`title.ilike.%${kw}%,description.ilike.%${kw}%`);
+  }
   if (opts.from) query = query.gte("created_at", opts.from);
-  if (opts.to) query = query.lte("created_at", opts.to);
+  if (opts.to) query = query.lte("created_at", endOfDayIfBareDate(opts.to));
   if (opts.tags && opts.tags.length > 0) query = query.overlaps("tags", normalizeTags(opts.tags));
   if (opts.cursor) {
     query = query.or(
