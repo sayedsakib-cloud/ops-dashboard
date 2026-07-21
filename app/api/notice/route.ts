@@ -15,6 +15,17 @@ export async function GET(req: NextRequest) {
   const tags = tagsParam ? tagsParam.split(",").filter(Boolean) : undefined;
   const cursorCreatedAt = sp.get("cursorCreatedAt");
   const cursorId = sp.get("cursorId");
+
+  const ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?(Z|[+-]\d{2}:\d{2})$/;
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (cursorCreatedAt !== null && !ISO_TIMESTAMP_RE.test(cursorCreatedAt)) {
+    return NextResponse.json({ error: "Invalid cursorCreatedAt: must be an ISO-8601 timestamp" }, { status: 400 });
+  }
+  if (cursorId !== null && !UUID_RE.test(cursorId)) {
+    return NextResponse.json({ error: "Invalid cursorId: must be a UUID" }, { status: 400 });
+  }
+
   const cursor = cursorCreatedAt && cursorId ? { createdAt: cursorCreatedAt, id: cursorId } : null;
 
   try {
