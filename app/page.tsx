@@ -8,6 +8,7 @@ import KPITab from "@/components/dashboard/tabs/KPITab";
 import RegularTaskTab from "@/components/dashboard/tabs/RegularTaskTab";
 import TicketsTab from "@/components/dashboard/tabs/TicketsTab";
 import TradingEthicsTab from "@/components/dashboard/tabs/TradingEthicsTab";
+import NoticeTab from "@/components/dashboard/tabs/NoticeTab";
 import Sidebar from "@/components/dashboard/Sidebar";
 import DashboardLoader from "@/components/dashboard/DashboardLoader";
 import ModeToggle from "@/components/layout/ModeToggle";
@@ -19,6 +20,7 @@ const TAB_LABELS: Record<string, string> = {
   "regular-task": "Regular Task",
   "tickets": "Tickets",
   "trading-ethics": "Trading Ethics Email Performance",
+  "notice": "Notice",
 };
 
 export default function DashboardPage() {
@@ -77,6 +79,9 @@ export default function DashboardPage() {
             </div>
             <div style={vis("trading-ethics")}>
               {mounted["trading-ethics"] ? <TradingEthicsTab /> : null}
+            </div>
+            <div style={vis("notice")}>
+              {mounted["notice"] ? <NoticeTab /> : null}
             </div>
           </div>
         </div>

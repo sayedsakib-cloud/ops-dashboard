@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 import { signOut, useSession } from "next-auth/react";
-import { Users, BarChart3, CheckSquare, Inbox, Mail, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
+import { Users, BarChart3, CheckSquare, Inbox, Mail, Megaphone, ChevronLeft, ChevronRight, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { id: "regular-task",   label: "Regular Task",         icon: CheckSquare },
   { id: "tickets",        label: "Tickets",              icon: Inbox       },
   { id: "trading-ethics", label: "Trading Ethics Email", icon: Mail        },
+  { id: "notice",         label: "Notice",               icon: Megaphone   },
 ];
 
 type Props = { active: string; onSwitch: (id: string) => void };
