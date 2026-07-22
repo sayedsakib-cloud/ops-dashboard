@@ -1,7 +1,6 @@
-// components/dashboard/notice/NoticeCreateModal.tsx
 "use client";
-import { useState } from "react";
-import { X, Loader2, Plus } from "lucide-react";
+import { useState, useEffect } from "react";
+import { X, Loader2, Edit } from "lucide-react";
 import {
   Dialog, DialogTrigger, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
@@ -12,7 +11,12 @@ import { Badge } from "@/components/ui/badge";
 import RichTextEditor from "@/components/dashboard/notice/RichTextEditor";
 import type { Notice } from "@/lib/notice";
 
-export default function NoticeCreateModal({ onCreated }: { onCreated: (notice: Notice) => void }) {
+interface NoticeEditModalProps {
+  notice: Notice;
+  onUpdated: (notice: Notice) => void;
+}
+
+export default function NoticeEditModal({ notice, onUpdated }: NoticeEditModalProps) {
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -21,10 +25,14 @@ export default function NoticeCreateModal({ onCreated }: { onCreated: (notice: N
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  function resetForm() {
-    setTitle(""); setDescription(""); setTagInput(""); setTags([]);
-    setError("");
-  }
+  useEffect(() => {
+    if (open) {
+      setTitle(notice.title);
+      setDescription(notice.description);
+      setTags(notice.tags);
+      setError("");
+    }
+  }, [open, notice]);
 
   function addTag() {
     const t = tagInput.trim().toLowerCase();
@@ -44,18 +52,17 @@ export default function NoticeCreateModal({ onCreated }: { onCreated: (notice: N
 
     setSubmitting(true);
     try {
-      const res = await fetch("/api/notice", {
-        method: "POST",
+      const res = await fetch(`/api/notice/${notice.id}`, {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: title.trim(), description: description.trim(), tags }),
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Failed to create notice");
-      onCreated(json.notice as Notice);
-      resetForm();
+      if (!res.ok) throw new Error(json.error || "Failed to update notice");
+      onUpdated(json.notice as Notice);
       setOpen(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to create notice");
+      setError(e instanceof Error ? e.message : "Failed to update notice");
     } finally {
       setSubmitting(false);
     }
@@ -64,11 +71,13 @@ export default function NoticeCreateModal({ onCreated }: { onCreated: (notice: N
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="gap-1.5"><Plus className="h-4 w-4" /> New Notice</Button>
+        <Button variant="ghost" size="icon" aria-label="Edit notice">
+          <Edit className="h-4 w-4 text-muted-foreground" />
+        </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New Notice</DialogTitle>
+          <DialogTitle>Edit Notice</DialogTitle>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -104,14 +113,13 @@ export default function NoticeCreateModal({ onCreated }: { onCreated: (notice: N
             ) : null}
           </div>
 
-
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
         </div>
 
         <DialogFooter>
           <Button variant="ghost" onClick={() => setOpen(false)} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Posting</> : "Post Notice"}
+            {submitting ? <><Loader2 className="mr-1 h-4 w-4 animate-spin" /> Updating</> : "Update Notice"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -18,13 +18,13 @@ function client(): SupabaseClient {
 export type Attachment = { type: "image" | "link"; url: string; label?: string };
 export type Notice = {
   id: string; title: string; description: string; tags: string[];
-  attachments: Attachment[]; authorName: string; authorEmail: string;
+  attachments: Attachment[]; authorName: string; authorEmail: string; authorImage?: string | null;
   createdAt: string; likeCount: number; likedByMe: boolean;
 };
 
 type NoticeRow = {
   id: string; title: string; description: string; tags: string[];
-  attachments: Attachment[]; author_name: string; author_email: string;
+  attachments: Attachment[]; author_name: string; author_email: string; author_image?: string | null;
   created_at: string;
 };
 
@@ -99,7 +99,7 @@ export async function listNotices(opts: {
   const items: Notice[] = page.map(r => ({
     id: r.id, title: r.title, description: r.description, tags: r.tags,
     attachments: r.attachments, authorName: r.author_name, authorEmail: r.author_email,
-    createdAt: r.created_at, likeCount: likeCounts[r.id] ?? 0, likedByMe: likedSet.has(r.id),
+    authorImage: r.author_image, createdAt: r.created_at, likeCount: likeCounts[r.id] ?? 0, likedByMe: likedSet.has(r.id),
   }));
 
   const last = page[page.length - 1];
@@ -110,7 +110,7 @@ export async function listNotices(opts: {
 
 export async function createNotice(input: {
   title: string; description: string; tags: string[]; attachments: Attachment[];
-  authorName: string; authorEmail: string;
+  authorName: string; authorEmail: string; authorImage?: string | null;
 }): Promise<Notice> {
   const c = client();
   const { data, error } = await c.from("notices").insert({
@@ -120,13 +120,40 @@ export async function createNotice(input: {
     attachments: input.attachments,
     author_name: input.authorName,
     author_email: input.authorEmail,
+    author_image: input.authorImage || null,
   }).select("*").single();
   if (error) throw new Error("notices insert: " + error.message);
   const row = data as NoticeRow;
   return {
     id: row.id, title: row.title, description: row.description, tags: row.tags,
     attachments: row.attachments, authorName: row.author_name, authorEmail: row.author_email,
-    createdAt: row.created_at, likeCount: 0, likedByMe: false,
+    authorImage: row.author_image, createdAt: row.created_at, likeCount: 0, likedByMe: false,
+  };
+}
+
+export async function updateNotice(id: string, requesterEmail: string, input: { title: string; description: string; tags: string[] }): Promise<{ ok: boolean; reason?: "not-found" | "forbidden"; notice?: Notice }> {
+  const c = client();
+  const { data, error } = await c.from("notices").select("author_email").eq("id", id).maybeSingle();
+  if (error) throw new Error("notices select: " + error.message);
+  if (!data) return { ok: false, reason: "not-found" };
+  if (data.author_email !== requesterEmail) return { ok: false, reason: "forbidden" };
+
+  const { data: updated, error: updErr } = await c
+    .from("notices")
+    .update({ title: input.title, description: input.description, tags: normalizeTags(input.tags) })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (updErr) throw new Error("notices update: " + updErr.message);
+
+  const row = updated as NoticeRow;
+  return {
+    ok: true,
+    notice: {
+      id: row.id, title: row.title, description: row.description, tags: row.tags,
+      attachments: row.attachments, authorName: row.author_name, authorEmail: row.author_email,
+      authorImage: row.author_image, createdAt: row.created_at, likeCount: 0, likedByMe: false,
+    },
   };
 }
 

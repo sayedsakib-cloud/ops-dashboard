@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
       title, description, tags, attachments,
       authorName: session.user.name ?? "Unknown",
       authorEmail: session.user.email,
+      authorImage: (session.user as any)?.image || null,
     });
     return NextResponse.json({ notice }, { status: 201 });
   } catch (e) {

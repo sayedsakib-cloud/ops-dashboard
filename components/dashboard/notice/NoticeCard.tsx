@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import NoticeEditModal from "@/components/dashboard/notice/NoticeEditModal";
 import type { Notice } from "@/lib/notice";
 
 function relativeTime(iso: string): string {
@@ -22,11 +23,12 @@ function relativeTime(iso: string): string {
 }
 
 export default function NoticeCard({
-  notice, currentUserEmail, onDeleted,
+  notice, currentUserEmail, onDeleted, onUpdated,
 }: {
   notice: Notice;
   currentUserEmail: string;
   onDeleted: (id: string) => void;
+  onUpdated?: (notice: Notice) => void;
 }) {
   const [liked, setLiked] = useState(notice.likedByMe);
   const [likeCount, setLikeCount] = useState(notice.likeCount);
@@ -82,7 +84,11 @@ export default function NoticeCard({
       <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
         <div className="flex items-center gap-3">
           <Avatar>
-            <AvatarFallback>{initial}</AvatarFallback>
+            {notice.authorImage ? (
+              <img src={notice.authorImage} alt={notice.authorName} className="h-full w-full object-cover" />
+            ) : (
+              <AvatarFallback>{initial}</AvatarFallback>
+            )}
           </Avatar>
           <div>
             <p className="text-sm font-semibold text-foreground">{notice.authorName}</p>
@@ -90,15 +96,18 @@ export default function NoticeCard({
           </div>
         </div>
         {isOwner ? (
-          <Button variant="ghost" size="icon" onClick={handleDelete} disabled={deleting} aria-label="Delete notice">
-            <Trash2 className="h-4 w-4 text-muted-foreground" />
-          </Button>
+          <div className="flex gap-1">
+            <NoticeEditModal notice={notice} onUpdated={onUpdated || (() => {})} />
+            <Button variant="ghost" size="icon" onClick={handleDelete} disabled={deleting} aria-label="Delete notice">
+              <Trash2 className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </div>
         ) : null}
       </CardHeader>
       <CardContent className="space-y-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">{notice.title}</h3>
-          <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{notice.description}</p>
+          <div className="mt-1 prose prose-sm dark:prose-invert max-w-none text-sm text-muted-foreground" dangerouslySetInnerHTML={{ __html: notice.description }} />
         </div>
 
         {notice.tags.length > 0 ? (
@@ -108,17 +117,13 @@ export default function NoticeCard({
         ) : null}
 
         {notice.attachments.length > 0 ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="space-y-1">
             {notice.attachments.map((a, i) =>
-              a.type === "image" ? (
-                <img key={i} src={a.url} alt="" className="h-24 w-full rounded-md border border-border object-cover" />
-              ) : (
-                <a key={i} href={a.url} target="_blank" rel="noreferrer"
-                  className="flex h-24 flex-col items-center justify-center gap-1 rounded-md border border-border bg-muted/40 p-2 text-center text-xs text-muted-foreground hover:bg-muted">
-                  <LinkIcon className="h-4 w-4" />
-                  <span className="truncate w-full">{a.label ?? a.url}</span>
-                </a>
-              )
+              <a key={i} href={a.url} target="_blank" rel="noreferrer"
+                className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
+                <LinkIcon className="h-4 w-4 flex-shrink-0" />
+                <span className="truncate">{a.label ?? a.url}</span>
+              </a>
             )}
           </div>
         ) : null}

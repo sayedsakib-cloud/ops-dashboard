@@ -6,11 +6,12 @@ import NoticeCard from "@/components/dashboard/notice/NoticeCard";
 import type { Notice } from "@/lib/notice";
 
 export default function NoticeFeed({
-  notices, currentUserEmail, onLoadMore, hasMore, loading, onDeleted,
+  notices, currentUserEmail, onLoadMore, hasMore, loading, onDeleted, onUpdated,
 }: {
   notices: Notice[]; currentUserEmail: string;
   onLoadMore: () => void; hasMore: boolean; loading: boolean;
   onDeleted: (id: string) => void;
+  onUpdated?: (notice: Notice) => void;
 }) {
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -31,7 +32,7 @@ export default function NoticeFeed({
   return (
     <div className="space-y-4">
       {notices.map(n => (
-        <NoticeCard key={n.id} notice={n} currentUserEmail={currentUserEmail} onDeleted={onDeleted} />
+        <NoticeCard key={n.id} notice={n} currentUserEmail={currentUserEmail} onDeleted={onDeleted} onUpdated={onUpdated} />
       ))}
       {hasMore ? <div ref={sentinelRef} className="h-4" /> : null}
       {loading ? (

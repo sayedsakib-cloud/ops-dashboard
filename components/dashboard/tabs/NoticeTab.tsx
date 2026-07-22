@@ -73,6 +73,10 @@ export default function NoticeTab() {
     setNotices(prev => prev.filter(n => n.id !== id));
   }
 
+  function handleUpdated(updated: Notice) {
+    setNotices(prev => prev.map(n => n.id === updated.id ? updated : n));
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -95,7 +99,7 @@ export default function NoticeTab() {
       <NoticeFeed
         notices={notices} currentUserEmail={currentUserEmail}
         onLoadMore={handleLoadMore} hasMore={hasMore} loading={loading}
-        onDeleted={handleDeleted}
+        onDeleted={handleDeleted} onUpdated={handleUpdated}
       />
     </div>
   );
